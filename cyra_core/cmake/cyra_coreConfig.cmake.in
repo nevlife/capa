@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(yaml-cpp)
+
+include("${CMAKE_CURRENT_LIST_DIR}/cyra_coreTargets.cmake")
+
+check_required_components(cyra_core)

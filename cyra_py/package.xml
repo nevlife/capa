@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cyra_py</name>
+  <version>0.0.0</version>
+  <description>
+    cyra Python binding (nanobind): thread scheduling for the calling thread and the chain
+    declaration file, plus cyra.flux for flux.ros.PartitionedExecutor threads.
+  </description>
+  <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>cyra_core</depend>
+  <build_depend>python3-dev</build_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>flux_py</test_depend>
+  <test_depend>python3-numpy</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>rclpy</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
