@@ -136,7 +136,9 @@ ex.spin();
 - `schedule(ex, node, group, stage)` checks the stage's name against the group on the spot. An rclcpp callback group has no name, so this pairing is the only link between the file's `(node, label)` and the thread. The group must belong to `node`, `node` must be the one the stage names, and an empty label means that node's default callback group. An `external` stage is refused.
 - One declaration per group, and the group must be served by `ex`. Both are checked by the executor: a second declaration throws on the spot, and a declaration for a group no child serves is refused by `spin()`.
 - Two groups given one stage are refused by `spin()`. The second child to apply it throws, since one stage is one thread (section 2).
-- Call `spin()` from a `SCHED_OTHER` thread. flux refuses a spin from an RT thread, because every child starts on the calling thread's scheduling.
+- Call `spin()` from a `SCHED_OTHER` thread. Every child starts on the calling thread's scheduling, so from an RT caller a group with no declaration would run at that priority, above the declared groups. flux does not check this. `verify_process` reports such threads as `undeclared-rt-thread`.
+- Put every input of one message_filters synchronizer in one group. The sync policy runs the matched callback under its own `std::mutex`, which has no priority inheritance, so inputs on two group threads tie the two groups' priorities together.
+- The message_filters path allocates (policy queues and `shared_ptr` control blocks per frame). Keep it out of a hard chain. Plain flux delivery does not allocate.
 
 ## 4. Python (`cyra_py`)
 

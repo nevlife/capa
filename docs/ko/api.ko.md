@@ -136,7 +136,9 @@ ex.spin();
 - `schedule(ex, node, group, stage)`는 단계의 이름과 그룹을 그 자리에서 대조한다. rclcpp 콜백 그룹에는 이름이 없어서, 이 짝이 파일의 `(node, label)`과 스레드를 잇는 유일한 연결이다. 그룹은 `node`의 것이어야 하고, `node`는 단계가 가리키는 노드여야 하며, 라벨이 비면 그 노드의 기본 콜백 그룹이어야 한다. `external` 단계는 거절한다.
 - 그룹당 선언 하나이고, 그 그룹은 `ex`가 맡아야 한다. 둘 다 executor가 검사한다. 두 번째 선언은 그 자리에서 던지고, 어느 자식도 맡지 않는 그룹의 선언은 `spin()`이 거절한다.
 - 한 단계를 두 그룹에 주면 `spin()`이 거절한다. 한 단계는 한 스레드이므로(2절) 두 번째로 거는 자식이 던진다.
-- `spin()`은 `SCHED_OTHER` 스레드에서 부른다. 자식은 호출 스레드의 스케줄링으로 시작하므로 flux가 RT 스레드의 spin을 거절한다.
+- `spin()`은 `SCHED_OTHER` 스레드에서 부른다. 자식은 호출 스레드의 스케줄링으로 시작하므로, RT 호출자에서는 선언이 없는 그룹이 그 우선순위로 선언된 그룹들보다 위에서 돈다. flux는 이것을 검사하지 않는다. `verify_process`가 그런 스레드를 `undeclared-rt-thread`로 보고한다.
+- message_filters synchronizer 하나의 입력은 전부 한 그룹에 둔다. 동기화 정책은 짝이 맞은 콜백을 자기 `std::mutex`를 쥔 채로 돌리고 그 뮤텍스에는 priority inheritance가 없어, 입력이 두 그룹 스레드에 걸치면 두 그룹의 우선순위가 묶인다.
+- message_filters 경로는 할당이 있다(정책 큐, 프레임마다 `shared_ptr` control block). hard 체인에는 놓지 않는다. 필터 없는 flux 배달에는 할당이 없다.
 
 ## 4. Python (`cyra_py`)
 
