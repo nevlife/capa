@@ -178,7 +178,7 @@ cyra.flux.set_thread_scheduling(ex, node, policy=cyra.Policy.Fifo, priority=20)
 cyra.flux.schedule(ex, infer_group, spec.stage(name, "infer"))
 ```
 
-- The `unit` is either a callback group given to `add_flux` or a node given to `add_ros_node`. In C++ it is one callback group, but rclpy splits the unit in two.
+- The `unit` is either a callback group given to `add` or a node given to `add_ros_node`. In C++ it is one callback group, but rclpy splits the unit in two.
 - The child applies the declaration to itself before its first callback, and a refusal becomes an exception from `spin()`. An external stage is refused there too.
 - One declaration per unit, shared between the two functions. A declaration for a unit the executor does not run is refused by `spin()`.
 - The stage's node is not checked against the unit. C++ checks it, but a flux group in Python does not know its node.

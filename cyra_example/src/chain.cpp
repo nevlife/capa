@@ -19,7 +19,9 @@ public:
   StageNode()
   : Node("cyra_stage"),
     group_(create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
-    sub_(*this, kTopic, Image::kFingerprint, [this](const flux::FrameView & f) { on_frame(f); })
+    sub_(*this, kTopic, Image::kFingerprint, flux::QoS{}, [this](const flux::FrameView & f) {
+      on_frame(f);
+    })
   {
     timer_ = create_wall_timer(std::chrono::seconds(1), [this]() { report(); });
   }
@@ -83,7 +85,6 @@ int main(int argc, char ** argv)
     }
   }
 
-  rclcpp::on_shutdown([&ex]() { ex.stop(); });
   ex.spin();
   rclcpp::shutdown();
   return 0;

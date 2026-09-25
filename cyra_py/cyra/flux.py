@@ -10,9 +10,9 @@ from ._cyra import Policy, apply
 def set_thread_scheduling(ex, unit, *, policy=None, priority=0, cpus=()):
     """Declare the OS scheduling for the thread of `ex` that will serve `unit`.
 
-    `unit` is a callback group handed to `add_flux`, or a node handed to `add_ros_node`.
+    `unit` is a callback group handed to `add`, or a node handed to `add_ros_node`.
 
-        ex.add_flux(front_camera, control)
+        ex.add(front_camera, control)
         cyra.flux.set_thread_scheduling(ex, control, cpus=[4, 5])
 
     `cyra.Policy.Fifo` needs RLIMIT_RTPRIO or CAP_SYS_NICE; affinity alone needs neither. One

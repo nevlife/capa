@@ -178,7 +178,7 @@ cyra.flux.set_thread_scheduling(ex, node, policy=cyra.Policy.Fifo, priority=20)
 cyra.flux.schedule(ex, infer_group, spec.stage(name, "infer"))
 ```
 
-- `unit`은 `add_flux`에 준 콜백 그룹이거나 `add_ros_node`에 준 노드다. C++은 콜백 그룹 하나지만 rclpy에서는 단위가 둘로 갈린다.
+- `unit`은 `add`에 준 콜백 그룹이거나 `add_ros_node`에 준 노드다. C++은 콜백 그룹 하나지만 rclpy에서는 단위가 둘로 갈린다.
 - 자식이 첫 콜백 전에 자기에게 걸고, 거절은 `spin()`의 예외가 된다. external 단계도 거기서 거절된다.
 - 두 함수를 합쳐 unit당 선언 하나다. executor가 안 돌리는 unit의 선언은 `spin()`이 거절한다.
 - 단계의 노드를 unit과 대조하지 않는다. C++은 대조하지만, Python의 flux 그룹은 자기 노드를 모른다.

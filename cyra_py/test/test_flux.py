@@ -68,7 +68,7 @@ def test_a_group_child_runs_where_it_was_declared(node):
     seen = []
 
     ex = flux.ros.PartitionedExecutor()
-    ex.add_flux(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
     cyra.flux.set_thread_scheduling(ex, group, cpus=[target])
 
     t = spin_in_thread(ex)
@@ -113,7 +113,7 @@ def test_a_stage_reaches_the_group_child(node, tmp_path):
     seen = []
 
     ex = flux.ros.PartitionedExecutor()
-    ex.add_flux(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
     cyra.flux.schedule(ex, group, spec.stage(node.get_fully_qualified_name(), "infer"))
 
     t = spin_in_thread(ex)
@@ -176,7 +176,7 @@ def test_two_groups_get_the_cpus_each_declared(node):
 
     ex = flux.ros.PartitionedExecutor()
     for index, (sub, group) in enumerate(zip(subs, groups)):
-        ex.add_flux(sub, group, record(index))
+        ex.add(sub, group, record(index))
     cyra.flux.set_thread_scheduling(ex, groups[0], cpus=[left])
     cyra.flux.set_thread_scheduling(ex, groups[1], cpus=[right])
 
@@ -217,7 +217,7 @@ def test_declaring_after_spin_started_is_refused(node):
     sub = flux.Subscription("/pytest/rt/late", fingerprint=FP)
     group = MutuallyExclusiveCallbackGroup()
     ex = flux.ros.PartitionedExecutor()
-    ex.add_flux(sub, group, lambda _v: None)
+    ex.add(sub, group, lambda _v: None)
 
     t = spin_in_thread(ex)
     try:
@@ -242,7 +242,7 @@ def test_a_refused_policy_ends_the_spin_rather_than_running_anyway(node):
     ran = []
 
     ex = flux.ros.PartitionedExecutor()
-    ex.add_flux(sub, group, lambda _v: ran.append(1))
+    ex.add(sub, group, lambda _v: ran.append(1))
     cyra.flux.set_thread_scheduling(ex, group, policy=cyra.Policy.Fifo, priority=99)
 
     with pytest.raises((RuntimeError, OSError)):
@@ -259,7 +259,7 @@ def test_a_granted_policy_reaches_the_child(node):
     seen = []
 
     ex = flux.ros.PartitionedExecutor()
-    ex.add_flux(sub, group, lambda _v: seen.append(cyra.current()))
+    ex.add(sub, group, lambda _v: seen.append(cyra.current()))
     cyra.flux.set_thread_scheduling(ex, group, policy=cyra.Policy.Fifo, priority=5)
 
     t = spin_in_thread(ex)
