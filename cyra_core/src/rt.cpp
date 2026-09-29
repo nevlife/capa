@@ -108,19 +108,24 @@ bool contains(const std::vector<std::uint32_t> & set, std::uint32_t cpu)
   return false;
 }
 
+std::optional<std::string> status_field(const std::string & status, const char * key)
+{
+  const std::string needle = std::string(key) + ":";
+  std::size_t pos = status.find(needle);
+  while (pos != 0 && pos != std::string::npos && status[pos - 1] != '\n') {
+    pos = status.find(needle, pos + 1);
+  }
+  if (pos == std::string::npos) return std::nullopt;
+  const std::size_t begin = pos + needle.size();
+  const std::size_t end = status.find('\n', begin);
+  return trimmed(status.substr(begin, end - begin));
+}
+
 std::optional<std::string> proc_status_field(const char * key)
 {
   const auto status = read_file("/proc/self/status");
   if (!status) return std::nullopt;
-  const std::string needle = std::string(key) + ":";
-  std::size_t pos = status->find(needle);
-  while (pos != 0 && pos != std::string::npos && (*status)[pos - 1] != '\n') {
-    pos = status->find(needle, pos + 1);
-  }
-  if (pos == std::string::npos) return std::nullopt;
-  const std::size_t begin = pos + needle.size();
-  const std::size_t end = status->find('\n', begin);
-  return trimmed(status->substr(begin, end - begin));
+  return status_field(*status, key);
 }
 
 // CAP_SYS_NICE is capability 23 (linux/capability.h); parsed from CapEff so cyra_core
@@ -426,12 +431,21 @@ void check_kernel_preemption(Report & rep)
   }
 }
 
-void check_memory_lock(Report & rep)
+// The memory of the thread being set, which for the daemon is another process's.
+void check_memory_lock(Report & rep, int tid)
 {
-  const auto vmlck = proc_status_field("VmLck");
+  const std::string path =
+    tid == 0 ? "/proc/self/status" : "/proc/" + std::to_string(tid) + "/status";
+  const auto status = read_file(path.c_str());
+  if (!status) {
+    rep.findings.push_back({"memory-lock", Verdict::Unknown, "cannot read " + path});
+    return;
+  }
+  const auto vmlck = status_field(*status, "VmLck");
   if (!vmlck) {
+    // Only a thread without a user address space has no Vm lines.
     rep.findings.push_back(
-      {"memory-lock", Verdict::Unknown, "cannot read VmLck from /proc/self/status"});
+      {"memory-lock", Verdict::Ok, "a kernel thread: no user memory to fault"});
     return;
   }
   const long long kb = std::strtoll(vmlck->c_str(), nullptr, 10);
@@ -624,9 +638,15 @@ std::string Report::to_string() const
 
 Report preflight(const Options & opts, int control_priority)
 {
+  return detail::preflight_to(0, opts, control_priority);
+}
+
+Report detail::preflight_to(int tid, const Options & opts, int control_priority)
+{
   opts.validate();
   Report rep;
 #if !defined(__linux__)
+  (void)tid;
   (void)control_priority;
   rep.findings.push_back({"platform", Verdict::Unknown, "cyra targets Linux; nothing checked"});
 #else
@@ -650,7 +670,7 @@ Report preflight(const Options & opts, int control_priority)
     check_irq_affinity(rep, opts);
   }
   check_kernel_preemption(rep);
-  check_memory_lock(rep);
+  check_memory_lock(rep, tid);
 #endif
   return rep;
 }
@@ -674,7 +694,7 @@ Report detail::apply_checked_to(
   // judgement. Preflighting here would report a host that no caller asked anything of.
   if (opts.policy == Policy::Inherit && opts.cpus.empty()) return Report{};
 
-  Report rep = preflight(opts, control_priority);
+  Report rep = detail::preflight_to(tid, opts, control_priority);
   const bool blocked = !rep.ok() || (strict == Strictness::Hard && has_warn(rep));
   if (blocked) {
     throw std::runtime_error(

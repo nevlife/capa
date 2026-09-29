@@ -130,7 +130,11 @@ Report apply_checked(
 
 namespace detail
 {
-// apply_checked() on thread `tid` (0 = the calling thread), read back with observe(). The daemon's.
+// preflight() for thread `tid` (0 = the calling thread): memory-lock is judged on that thread's
+// process, not the caller's. The daemon's, which sets threads of other processes.
+Report preflight_to(int tid, const Options & opts, int control_priority);
+// apply_checked() on thread `tid` (0 = the calling thread), judged by preflight_to() and read back
+// with observe(). The daemon's.
 Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
 }  // namespace detail
 

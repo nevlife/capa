@@ -1,5 +1,5 @@
-# Defect classes only, the same set as flux. Each disabled check below was run over the flux tree
-# and every hit was a false positive or intended.
+# Defect classes only. Each disabled check below was run over this tree and every hit was a false
+# positive or intended.
 # Only cyra's own headers: the vendored nanobind under thirdparty/ is not ours to change.
 HeaderFilterRegex: '.*/cyra_[a-z]+/include/.*'
 Checks: >

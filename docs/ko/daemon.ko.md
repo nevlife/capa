@@ -10,20 +10,25 @@ cyrad [--spec FILE] [--interval SEC] [--once]
 
 | 시그널 | 동작 |
 | --- | --- |
-| SIGHUP | 파일을 다시 읽는다. 규칙을 어기는 파일은 거절하고 이전 파일을 유지한다. 같은 방식으로 여전히 match하는 stage의 스레드는 그대로 두고, 나머지는 되돌린다 |
-| SIGTERM, SIGINT | 건 스레드를 전부 원래 값으로 되돌리고 끝난다 |
+| SIGHUP | 파일을 다시 읽는다. 규칙을 어기는 파일은 거절하고 이전 파일을 유지한다. 같은 방식으로 여전히 match하는 stage의 스레드는 그대로 두고, 나머지는 되돌린다. 옮긴 자식은 stage의 새 `children_cpus`로 따라가고, stage에 `children_cpus`가 없어지면 원래 CPU로 돌아간다 |
+| SIGTERM, SIGINT | 건 스레드와 옮긴 자식을 전부 원래 값으로 되돌리고 끝난다 |
+
+cyrad는 건 것과 옮긴 것을 각 스레드의 원래 값과 함께 `CYRA_DAEMON_DIR`(기본 `/run/cyra`)의 `cyrad.state`에 적는다. 바뀔 때마다 파일을 통째로 다시 쓴다. 정상 종료 없이 죽으면(`kill -9`, 크래시) 파일이 남고, 다음 cyrad가 첫 pass 전에 그것을 이어받는다. 재적재와 같은 방식이다. 여전히 같은 방식으로 match하는 stage의 스레드는 처음 값과 함께 맡고, 나머지는 바로 되돌린다. 그래서 재시작한 뒤에 멈춰도 스레드는 처음 값으로 돌아간다. `/run`은 부팅 때 비워지고, 스레드도 그때 새로 시작한다.
 
 ## 한 번 훑을 때
 
 | stage | cyrad가 하는 일 |
 | --- | --- |
-| `match` | stage의 `preflight`를 돌리고, 거절이면(`Fail`, 또는 hard 체인의 `Warn`) 건너뛴다. match가 가리키는 스레드를 찾는다. 정확히 하나면 걸고 `apply_checked`처럼 되읽으며, 벗어나면 되돌린다. 없으면 match 안 됨으로 보고한다. 둘 이상이면 추측하지 않고 아무것도 걸지 않는다 |
+| `match` | match가 가리키는 스레드를 찾는다. 정확히 하나면 그 스레드에 대해 `preflight`를 돌린다(메모리 잠금은 그 스레드의 프로세스로 판정한다). 거절이면(`Fail`, 또는 hard 체인의 `Warn`) 건너뛴다. 아니면 걸고 `apply_checked`처럼 되읽으며, 벗어나면 되돌린다. 없거나, 둘 이상이거나, 거절이거나, 전과 다른 스레드면 전에 건 스레드를 처음 값으로 되돌리고 아무것도 걸지 않는다 |
 | 스레드가 bind한 stage(`bind`, `spawn`, flux) | 드리프트를 보고만 하고 바꾸지 않는다. stage의 주인은 그 스레드다. `children_cpus`가 있으면 그 stage의 reset 자식을 그리로 옮긴다 |
 | `external` | 아무것도 안 한다 |
 
-reset 자식은 물려받은 흔적으로 알아본다. stage를 쥔 프로세스의 스레드 중 stage를 쥐지 않았고, SCHED_OTHER이고, 허용 CPU가 stage의 cpus와 정확히 같은 스레드다.
+- cyrad는 되돌릴 수 있는 스레드에만 건다. SCHED_OTHER, SCHED_FIFO, SCHED_RR로 도는 스레드다. SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE 스레드는 보고하고 그대로 둔다.
+- tid를 재사용한 다른 스레드는 시작 시각으로 가린다. 걸거나 옮기는 사이에 시작 시각이 바뀌면 그렇게 보고하고 그 스레드를 맡지 않는다.
 
-cyrad도 bind하는 프로세스처럼 자기가 건 stage를 기록한다. 그래서 `cyra status`에 cyrad가 건 스레드의 pid와 tid가 나온다. 바뀐 것이 있을 때마다 stderr에 한 줄씩 쓴다.
+커널은 어느 스레드가 어느 스레드를 만들었는지 알려 주지 않는다. 그래서 reset 자식은 물려받은 흔적으로 알아본다. stage를 쥔 프로세스의 스레드 중 stage를 쥐지 않았고, stage를 bind할 때 아직 없었고(bind가 그때 있던 스레드를 기록한다), SCHED_OTHER이고, 허용 CPU가 stage의 cpus와 정확히 같은 스레드다. bind 뒤에 다른 스레드가 만든 스레드가 스스로 정확히 그 CPU에 고정하면 똑같이 보여서 함께 옮겨진다. 옮긴 스레드는 원래 CPU와 함께 기억한다.
+
+cyrad도 자기가 건 stage를 기록한다. 그래서 `cyra status`에 cyrad가 건 스레드의 pid와 tid가 나온다. 이 기록은 다른 프로세스의 스레드를 가리키므로 bind 기록과 떨어진 `CYRA_DAEMON_DIR`(기본 `/run/cyra`)에 둔다. cyrad는 디렉터리가 없으면 만들고, 자기 사용자의 것이 아니거나 다른 사용자가 쓸 수 있는 디렉터리에는 쓰지 않는다. 읽는 쪽도 그런 디렉터리는 무시한다. 바뀐 것이 있을 때마다 stderr에 한 줄씩 쓴다.
 
 ## 찾는 방법
 

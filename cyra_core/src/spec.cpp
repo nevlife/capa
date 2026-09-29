@@ -407,6 +407,20 @@ Spec Spec::load(const std::string & path)
     fail("'" + path + "': " + e.what());
   }
 
+  // Messages, the claims of this process, the records and the daemon all name a stage by how it
+  // is spelled, so two stages spelled alike would be taken for one.
+  std::map<std::string, const Stage *> spelled;
+  for (const Stage & st : spec.stages_) {
+    const auto [it, fresh] = spelled.emplace(detail::stage_name(st), &st);
+    if (fresh) continue;
+    auto which = [](const Stage & x) {
+      return "node " + x.node + (x.group.empty() ? " (default group)" : " group " + x.group);
+    };
+    fail(
+      "two stages are both named " + it->first + ": " + which(*it->second) + " and " + which(st) +
+      "; rename one so each stage has its own name");
+  }
+
   for (const auto & chain : chains) {
     check_flow(spec.stages_, chain);
     check_release(spec.stages_, chain);
@@ -465,6 +479,7 @@ struct Hold
   std::string node;
   std::string group;
   std::string name;
+  std::vector<record::Task> earlier;  // the process's threads before the bind: not its children
 };
 struct Claims
 {
@@ -484,9 +499,10 @@ std::string republish_locked()
   std::vector<record::Entry> entries;
   for (const auto & [stage, h] : claims().by_stage) {
     entries.push_back(
-      {h.node, h.group, h.name, ::getpid(), h.tid, record::task_starttime(::getpid(), h.tid)});
+      {h.node, h.group, h.name, ::getpid(), h.tid, record::task_starttime(::getpid(), h.tid),
+       h.earlier});
   }
-  return record::publish(entries);
+  return record::publish(record::Writer::Bind, entries);
 }
 
 // The stage this thread holds, released when the thread exits so a respawned thread can take it.
@@ -537,6 +553,13 @@ Report apply_checked(const Stage & stage)
   std::call_once(atfork, [] { ::pthread_atfork(on_fork_prepare, on_fork_parent, on_fork_child); });
 
   const std::string name = detail::stage_name(stage);
+  // Taken before the thread is set, so a thread it starts afterwards is never among them.
+  std::vector<record::Task> earlier = record::tasks_of(::getpid());
+  const int self = this_tid();
+  earlier.erase(
+    std::remove_if(
+      earlier.begin(), earlier.end(), [&](const record::Task & t) { return t.first == self; }),
+    earlier.end());
   Claims & c = claims();
   {
     std::lock_guard<std::mutex> lock(c.m);
@@ -546,8 +569,10 @@ Report apply_checked(const Stage & stage)
         "cyra: stage " + name + " is already applied on thread " + std::to_string(it->second.tid) +
         "; one stage declares one thread");
     }
+    // The same thread again: what it started since the first bind is still its children.
+    if (it != c.by_stage.end()) earlier = std::move(it->second.earlier);
     if (!held.name.empty()) c.by_stage.erase(held.name);
-    c.by_stage[name] = Hold{this_tid(), stage.node, stage.group, stage.name};
+    c.by_stage[name] = Hold{self, stage.node, stage.group, stage.name, std::move(earlier)};
     held.name = name;
   }
   Report rep;
@@ -597,9 +622,28 @@ std::string detail::record_bindings(const std::vector<Binding> & held)
   entries.reserve(held.size());
   for (const auto & b : held) {
     entries.push_back(
-      {b.node, b.group, b.name, b.pid, b.tid, record::task_starttime(b.pid, b.tid)});
+      {b.node, b.group, b.name, b.pid, b.tid, record::task_starttime(b.pid, b.tid), {}});
   }
-  return record::publish(entries);
+  return record::publish(record::Writer::Daemon, entries);
+}
+
+std::string detail::daemon_dir()
+{
+  std::string why;
+  std::string d = record::daemon_dir(why);
+  if (!why.empty()) throw std::runtime_error("cyra: " + why);
+  return d;
+}
+
+std::vector<detail::HeldStage> detail::held_stages()
+{
+  std::vector<HeldStage> out;
+  for (const auto & proc : record::read_live()) {
+    for (const auto & e : proc.entries) {
+      out.push_back({{e.node, e.group, e.name, e.pid, e.tid}, e.earlier});
+    }
+  }
+  return out;
 }
 
 Report bind(const std::string & target, const std::string & group)
@@ -843,6 +887,7 @@ Report verify_process(const Spec & spec, int pid)
     if (proc.pid == pid) recorded = true;
     for (const auto & e : proc.entries) {
       if (e.pid != pid) continue;
+      recorded = true;  // the daemon's record, for a process that binds nothing itself
       Stage key;
       key.node = e.node;
       key.group = e.group;
@@ -855,7 +900,7 @@ Report verify_process(const Spec & spec, int pid)
     add(
       rep, "record", Verdict::Unknown,
       "process " + std::to_string(pid) +
-        " has no live record, so which of its threads hold a stage is not known");
+        " has no live record naming its threads, so which of them hold a stage is not known");
   }
   return rep;
 }

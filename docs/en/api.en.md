@@ -91,6 +91,7 @@ Rules, checked when the file is read. Every rule reports the stages that break i
 | Criticality | On a shared cpu, every RT stage of a more critical chain runs strictly above every RT stage of a less critical one. A stage on several chains takes their highest criticality |
 | Hard core | Where a hard chain is involved, two RT workers are not pinned to one cpu. SCHED_FIFO has no timeslice, so one would hold the core until it blocks. Release stages do not count |
 | One declaration | A stage on two chains is declared the same way on both. Its strictness is the strictest of them |
+| One name | No two stages are spelled alike. Node `/foo/bar` with its default group and node `/foo` with group `bar` are both `/foo/bar`, and messages, records and the daemon name a stage by its spelling |
 
 - "Can share a cpu" means the `cpus` overlap. No `cpus`, and an external stage, can land anywhere, so they share every cpu.
 - Stages that are not RT (`policy: other`, `inherit`, external with `expect_priority: 0`) take part in no rule.
@@ -184,8 +185,17 @@ Items the file does not claim are `Unknown`.
 
 A thread that holds a stage is recorded, so other processes can see it. Each process that binds keeps one record, `/dev/shm/cyra.<pid>.<starttime>` (`CYRA_RUN_DIR` moves it), write-locked for as long as it lives. The kernel drops the lock when the process exits, so a reader tells a live record from a dead one without asking the process. A forked child does not keep its parent's record alive.
 
+Every user can write `/dev/shm`, so a reader believes a record only as far as the kernel vouches for it:
+
+| Record | Believed when |
+| --- | --- |
+| A bind record, in `CYRA_RUN_DIR` | It is a regular file (not a link, not a fifo) writable by its owner only, its owner is the user of the process its name gives, that process started at the time its name gives, and it is locked. Its lines about other processes are ignored |
+| The daemon's record, in `CYRA_DAEMON_DIR` (default `/run/cyra`) | The same, except that its lines may name any process: the directory vouches for them, so it must be writable by its owner alone and the file must be that owner's |
+
+A record carries its length and a checksum, so one read in the middle of its rewrite is read again rather than half believed.
+
 - `bindings()` lists every stage held on this host: `Binding` has `node`, `group`, `name`, `pid`, and `tid`. Records of exited processes and entries of ended threads are left out. Reading deletes nothing; the next process that creates its record sweeps the dead ones.
-- `verify_process(spec, pid)` asks the `verify_process(spec)` question about another process, with the holders read from its record. A process that is gone is an `observed-process` Fail. A process with no record gets a `record` Unknown, since which of its threads hold a stage is then not known.
+- `verify_process(spec, pid)` asks the `verify_process(spec)` question about another process, with the holders read from its record. A process that is gone is an `observed-process` Fail. A process no record names (neither its own nor the daemon's) gets a `record` Unknown, since which of its threads hold a stage is then not known.
 - When the record cannot be written, the apply still stands and its report carries a `record` Unknown: other processes will not see that thread.
 
 `ThreadState` has `policy` (the raw `SCHED_*` number, since a thread may hold a class `Policy` does not name), `priority`, `cpus`, and `reset_on_fork`.

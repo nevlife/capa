@@ -173,9 +173,23 @@ std::vector<Binding> bindings();
 
 namespace detail
 {
-// Publish this process's record as holding `held`, threads of other processes included. The
-// daemon's: a process that binds keeps its record through apply_checked(stage).
+// Publish the daemon's record as holding `held`, threads of other processes. It goes to
+// CYRA_DAEMON_DIR (default /run/cyra), which must be this user's and writable by no one else; a
+// process that binds keeps its own record through apply_checked(stage).
 std::string record_bindings(const std::vector<Binding> & held);
+
+// A held stage with the threads (tid, start time) its process already had when the stage was
+// bound. None of those is a child of the stage. The daemon's.
+struct HeldStage
+{
+  Binding binding;
+  std::vector<std::pair<int, std::uint64_t>> earlier;
+};
+std::vector<HeldStage> held_stages();
+
+// The daemon's directory (CYRA_DAEMON_DIR, default /run/cyra), created if missing. Throws
+// std::runtime_error when it is not this user's or others can write it.
+std::string daemon_dir();
 // /proc/<pid>/task/<tid>/stat field 22, 0 when unreadable. Tells a thread from its tid's reuse.
 std::uint64_t task_starttime(int pid, int tid);
 }  // namespace detail

@@ -2,7 +2,7 @@
 //!
 //! SIGHUP rereads the file (a file that breaks a rule is refused and the old one kept). SIGTERM and
 //! SIGINT put every thread the daemon set back and exit. --once runs one pass and exits, leaving
-//! what it set in place.
+//! what it set in place. Either way it starts by taking over what a crashed run left.
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -53,6 +53,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    print(rec.recover());
     if once {
         print(rec.pass());
         return ExitCode::SUCCESS;

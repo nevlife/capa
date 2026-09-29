@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 #include <sched.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -419,4 +423,45 @@ TEST(Rt, ChildrenFollowTheDeclaredPolicy)
     }
     EXPECT_FALSE(child.reset_on_fork) << "the flag is not itself inherited";
   }
+}
+
+// The daemon judges threads of other processes. A page fault stalls the process that takes it, so
+// memory-lock is read from the target's process, and a kernel thread has no user memory at all.
+TEST(Preflight, MemoryLockIsJudgedOnTheTargetsProcess)
+{
+  cyra::Options o;
+  o.cpus = {0};
+  int fds[2];
+  ASSERT_EQ(::pipe(fds), 0);
+  const pid_t pid = ::fork();
+  if (pid == 0) {
+    ::close(fds[0]);
+    static char page[4096];
+    // A sanitizer build intercepts mlock and locks nothing, so the kernel's count decides.
+    const bool locked =
+      ::mlock(page, sizeof page) == 0 &&
+      cyra::detail::preflight_to(0, o, 0).find("memory-lock")->verdict == cyra::Verdict::Ok;
+    const char c = locked ? 'y' : 'n';
+    if (::write(fds[1], &c, 1) != 1) ::_exit(1);
+    for (;;) ::pause();
+  }
+  ::close(fds[1]);
+  char c = 0;
+  ASSERT_EQ(::read(fds[0], &c, 1), 1);
+  ::close(fds[0]);
+  const cyra::Report theirs = cyra::detail::preflight_to(pid, o, 0);
+  ::kill(pid, SIGKILL);
+  ::waitpid(pid, nullptr, 0);
+  if (c != 'y')
+    GTEST_SKIP() << "cyra-cap:memlock no page could be locked (host limit or sanitizer)";
+
+  const cyra::Report mine = cyra::preflight(o);
+  ASSERT_NE(theirs.find("memory-lock"), nullptr) << theirs.to_string();
+  EXPECT_EQ(theirs.find("memory-lock")->verdict, cyra::Verdict::Ok) << theirs.to_string();
+  EXPECT_EQ(mine.find("memory-lock")->verdict, cyra::Verdict::Warn)
+    << "this test process locks no memory, so its own verdict must differ";
+
+  const cyra::Report kthread = cyra::detail::preflight_to(2, o, 0);  // kthreadd
+  ASSERT_NE(kthread.find("memory-lock"), nullptr);
+  EXPECT_EQ(kthread.find("memory-lock")->verdict, cyra::Verdict::Ok) << kthread.to_string();
 }

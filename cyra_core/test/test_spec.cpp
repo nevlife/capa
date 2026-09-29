@@ -597,6 +597,21 @@ chains:
     "<loaded>");
 }
 
+// A node's default group and a group of its parent namespace are spelled the same. Every place a
+// stage is named by its spelling would take the two for one, so the file is refused.
+TEST(Spec, TwoStagesSpelledAlikeAreRefused)
+{
+  const std::string err = load_error(R"(
+chains:
+  c:
+    target: soft
+    stages:
+      - {node: /foo/bar, cpus: [0]}
+      - {node: /foo, group: bar, cpus: [1]}
+)");
+  EXPECT_NE(err.find("both named /foo/bar"), std::string::npos) << err;
+}
+
 TEST(Spec, NameStagesAreNotNodes)
 {
   SpecFile f(R"(

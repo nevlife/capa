@@ -91,6 +91,7 @@ chains:
 | 중요도 | 공유 CPU에서 더 중요한 체인의 RT stage는 덜 중요한 체인의 RT stage보다 전부 엄격히 높다. 여러 체인에 속한 stage는 그중 가장 높은 중요도를 가진다 |
 | hard 코어 | hard 체인이 걸린 곳에서 RT worker 둘을 한 CPU에 핀하지 않는다. SCHED_FIFO에는 타임슬라이스가 없어 하나가 block할 때까지 코어를 쥔다. release stage는 세지 않는다 |
 | 선언 하나 | 두 체인에 나오는 stage는 두 곳에서 같게 선언한다. strictness는 그중 가장 엄격한 것이다 |
+| 이름 하나 | 두 stage가 같은 이름이 되지 않는다. 노드 `/foo/bar`의 기본 그룹과 노드 `/foo`의 그룹 `bar`는 둘 다 `/foo/bar`다. 메시지, 기록, 데몬은 stage를 이 이름으로 부른다 |
 
 - "CPU를 공유할 수 있다"는 `cpus`가 겹친다는 뜻이다. `cpus`가 없는 stage와 external stage는 어디에나 올 수 있으므로 모든 CPU를 공유한다.
 - RT가 아닌 stage(`policy: other`, `inherit`, `expect_priority: 0`인 external)는 어떤 규칙에도 들어가지 않는다.
@@ -184,8 +185,17 @@ cyra::Report stray = cyra::verify_process(spec);                   // 설명되�
 
 stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bind하는 프로세스는 기록 하나를 `/dev/shm/cyra.<pid>.<starttime>`(`CYRA_RUN_DIR`로 옮길 수 있다)에 두고, 사는 동안 쓰기 락을 쥔다. 프로세스가 끝나면 커널이 락을 푼다. 그래서 읽는 쪽은 그 프로세스에 묻지 않고도 살아 있는 기록과 죽은 기록을 가른다. fork한 자식은 부모의 기록을 살려 두지 않는다.
 
+`/dev/shm`은 모든 사용자가 쓸 수 있다. 그래서 읽는 쪽은 커널이 보증하는 만큼만 기록을 믿는다.
+
+| 기록 | 믿는 조건 |
+| --- | --- |
+| bind 기록(`CYRA_RUN_DIR`) | 일반 파일이고(링크나 fifo가 아니다) 소유자만 쓸 수 있다. 소유자가 이름이 가리키는 프로세스의 사용자이고, 그 프로세스가 이름에 적힌 시각에 시작했고, 락이 걸려 있다. 다른 프로세스를 가리키는 줄은 무시한다 |
+| 데몬 기록(`CYRA_DAEMON_DIR`, 기본 `/run/cyra`) | 같다. 다만 줄이 어느 프로세스든 가리킬 수 있다. 디렉터리가 그것을 보증하므로, 디렉터리는 소유자만 쓸 수 있어야 하고 파일도 그 소유자의 것이어야 한다 |
+
+기록에는 길이와 체크섬이 있다. 다시 쓰는 도중에 읽힌 기록은 반쯤 믿지 않고 다시 읽는다.
+
 - `bindings()`는 이 호스트에서 쥐어진 stage를 전부 준다. `Binding`은 `node`, `group`, `name`, `pid`, `tid`다. 끝난 프로세스의 기록과 끝난 스레드의 줄은 빠진다. 읽기는 아무것도 지우지 않는다. 죽은 기록은 다음에 자기 기록을 만드는 프로세스가 치운다.
-- `verify_process(spec, pid)`는 `verify_process(spec)`와 같은 질문을 다른 프로세스에 한다. stage를 쥔 스레드는 그 프로세스의 기록에서 읽는다. 사라진 프로세스는 `observed-process` Fail이다. 기록이 없는 프로세스는 어느 스레드가 stage를 쥐었는지 모르므로 `record` Unknown이 붙는다.
+- `verify_process(spec, pid)`는 `verify_process(spec)`와 같은 질문을 다른 프로세스에 한다. stage를 쥔 스레드는 그 프로세스의 기록에서 읽는다. 사라진 프로세스는 `observed-process` Fail이다. 어떤 기록(자기 기록, 데몬 기록)도 가리키지 않는 프로세스는 어느 스레드가 stage를 쥐었는지 모르므로 `record` Unknown이 붙는다.
 - 기록을 쓰지 못해도 적용은 그대로이고, report에 `record` Unknown이 남는다. 다른 프로세스는 그 스레드를 보지 못한다.
 
 `ThreadState`는 `policy`(raw `SCHED_*` 숫자. `Policy`가 이름 붙이지 않은 클래스일 수 있다), `priority`, `cpus`, `reset_on_fork`다.

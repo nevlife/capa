@@ -71,6 +71,9 @@ set(cyra_core_test_srcs
 # Tests write their records here rather than into the host's /dev/shm.
 set(CYRA_TEST_RUN_DIR ${CMAKE_CURRENT_BINARY_DIR}/run)
 file(MAKE_DIRECTORY ${CYRA_TEST_RUN_DIR})
+# Not made here: the daemon's record directory must be writable by its owner alone, and the
+# writer creates it that way whatever the umask.
+set(CYRA_TEST_DAEMON_DIR ${CMAKE_CURRENT_BINARY_DIR}/daemon_run)
 
 # Without libFuzzer the harness links a replay main() that runs a corpus bent from valid files,
 # so ctest keeps it compiled and exercised between fuzzing sessions.
@@ -97,7 +100,8 @@ if(ament_cmake_FOUND)
 
   if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
-    ament_add_gtest(test_cyra_core ${cyra_core_test_srcs} ENV CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR})
+    ament_add_gtest(test_cyra_core ${cyra_core_test_srcs}
+      ENV CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR} CYRA_DAEMON_DIR=${CYRA_TEST_DAEMON_DIR})
     if(TARGET test_cyra_core)
       target_link_libraries(test_cyra_core cyra_core Threads::Threads)
       target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
@@ -139,7 +143,8 @@ else()
     target_link_libraries(test_cyra_core PRIVATE cyra_core GTest::gtest GTest::gtest_main Threads::Threads)
     target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
     add_test(NAME test_cyra_core COMMAND test_cyra_core)
-    set_tests_properties(test_cyra_core PROPERTIES ENVIRONMENT CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR})
+    set_tests_properties(test_cyra_core PROPERTIES ENVIRONMENT
+      "CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR};CYRA_DAEMON_DIR=${CYRA_TEST_DAEMON_DIR}")
     if(NOT CYRA_FUZZER)
       add_test(NAME fuzz_spec_corpus COMMAND fuzz_spec)
     endif()

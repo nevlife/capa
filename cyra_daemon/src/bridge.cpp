@@ -5,6 +5,7 @@
 #include <sched.h>
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -60,10 +61,10 @@ rust::Vec<Stage> stages(const cyra::Spec & spec)
   return out;
 }
 
-rust::String refusal(const cyra::Spec & spec, std::size_t index)
+rust::String refusal(const cyra::Spec & spec, std::size_t index, int tid)
 {
   const cyra::Stage & st = spec.stages().at(index);
-  const cyra::Report host = cyra::preflight(st.opts);
+  const cyra::Report host = cyra::detail::preflight_to(tid, st.opts, 0);
   const bool warned = std::any_of(host.findings.begin(), host.findings.end(), [](const auto & f) {
     return f.verdict == cyra::Verdict::Warn;
   });
@@ -111,7 +112,8 @@ void put_back(int tid, const ThreadState & state)
       o.priority = state.priority;
       break;
     default:
-      break;  // BATCH, IDLE, DEADLINE: not expressible in Options, so the policy is left alone
+      throw std::invalid_argument(
+        "cyrad: policy " + std::to_string(state.policy) + " cannot be put back");
   }
   o.cpus.assign(state.cpus.begin(), state.cpus.end());
   const bool rt = o.policy == cyra::Policy::Fifo || o.policy == cyra::Policy::RoundRobin;
@@ -133,6 +135,24 @@ rust::Vec<Binding> bindings()
     out.push_back(Binding{b.node, b.group, b.name, b.pid, b.tid});
   }
   return out;
+}
+
+rust::Vec<HeldStage> held_stages()
+{
+  rust::Vec<HeldStage> out;
+  for (const auto & h : cyra::detail::held_stages()) {
+    HeldStage s;
+    s.binding =
+      Binding{h.binding.node, h.binding.group, h.binding.name, h.binding.pid, h.binding.tid};
+    for (const auto & [tid, start] : h.earlier) s.earlier.push_back(Task{tid, start});
+    out.push_back(std::move(s));
+  }
+  return out;
+}
+
+rust::String daemon_dir()
+{
+  return cyra::detail::daemon_dir();
 }
 
 rust::String record(rust::Slice<const Binding> held)

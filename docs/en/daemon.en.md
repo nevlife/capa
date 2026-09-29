@@ -10,20 +10,25 @@ The file is `--spec`, else `CYRA_SPEC`. Every `--interval` seconds (default 1) i
 
 | Signal | Effect |
 | --- | --- |
-| SIGHUP | Reread the file. A file that breaks a rule is refused and the old one kept. Threads of stages that still match the same way stay set; the rest are put back |
-| SIGTERM, SIGINT | Put every thread it set back to what it ran at before, and exit |
+| SIGHUP | Reread the file. A file that breaks a rule is refused and the old one kept. Threads of stages that still match the same way stay set; the rest are put back. Children it moved follow their stage's new `children_cpus`, and go back where they ran when their stage no longer has any |
+| SIGTERM, SIGINT | Put every thread it set, and every child it moved, back to what it ran at before, and exit |
+
+What it set and moved, with what each thread ran at before, cyrad keeps in `cyrad.state` in `CYRA_DAEMON_DIR` (default `/run/cyra`), rewritten whole whenever it changes. A cyrad killed without its stop (`kill -9`, a crash) leaves the file behind, and the next cyrad takes over from it before its first pass, as a reload does: threads of stages still matched the same way stay its own with their first values, the rest go back at once. A stop after a restart therefore puts threads back where they started. `/run` is emptied at boot, and so are the threads.
 
 ## One pass
 
 | Stage | What cyrad does |
 | --- | --- |
-| `match` | Runs `preflight` for the stage and skips it when that refuses (a `Fail`, or a `Warn` on a hard chain). Finds the threads the match names. Exactly one: sets it, read back like `apply_checked`, and puts it back when it drifts. None: reports the stage unmatched. Two or more: refuses to guess and sets none |
+| `match` | Finds the threads the match names. Exactly one: runs `preflight` for it, with memory judged on that thread's process, and skips it when that refuses (a `Fail`, or a `Warn` on a hard chain). Otherwise sets it, read back like `apply_checked`, and puts it back when it drifts. None, two or more, a refusal, or a different thread than before: the thread it set before goes back to what it ran at first, and nothing is set |
 | bound by a thread (`bind`, `spawn`, flux) | Reports drift and changes nothing: the thread owns its stage. With `children_cpus`, moves the stage's reset children there |
 | `external` | Nothing |
 
-A reset child is recognized by what it inherited: a thread of the holder's process that holds no stage, runs SCHED_OTHER, and is allowed exactly the stage's cpus.
+- cyrad sets only a thread it can put back: one running SCHED_OTHER, SCHED_FIFO or SCHED_RR. A thread on SCHED_BATCH, SCHED_IDLE or SCHED_DEADLINE is reported and left alone.
+- A thread is told from a later thread reusing its tid by its start time. When that changes while cyrad sets or moves it, cyrad says so and does not keep it.
 
-cyrad records the stages it set like any binding process, so `cyra status` shows them with the pid and tid of the thread it set. It prints one line per change on stderr.
+A reset child is recognized by what it inherited, since the kernel does not say which thread started which: a thread of the holder's process that holds no stage, was not there yet when the stage was bound (the bind records the threads it found), runs SCHED_OTHER, and is allowed exactly the stage's cpus. A thread started after the bind by another thread that pins itself to exactly those cpus looks the same and is moved too. What cyrad moved it remembers, with where it ran before.
+
+cyrad records the stages it set, so `cyra status` shows them with the pid and tid of the thread it set. Its record names threads of other processes, so it is kept apart from the bind records, in `CYRA_DAEMON_DIR` (default `/run/cyra`). cyrad creates the directory if missing and refuses to write into one that is not its user's or that others can write; readers ignore such a directory too. cyrad prints one line per change on stderr.
 
 ## Matching
 

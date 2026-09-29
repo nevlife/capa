@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 
 use cxx::UniquePtr;
 
-use crate::ffi::{self, Binding, Match, Spec, Stage, ThreadState};
+use crate::ffi::{self, Binding, HeldStage, Match, Spec, Stage, Task, ThreadState};
+use crate::state;
+
+const STATE_HEAD: &str = "cyrad-state 1";
 
 /// Where the kernel's tables are read from. Tests point these at fake trees.
 #[derive(Clone, Debug)]
@@ -102,12 +105,21 @@ struct Owned {
     matcher: Match,
 }
 
+/// A reset child the daemon moved off its stage's cpus, and where it ran before.
+struct Moved {
+    stage: String,
+    pid: i32,
+    original: Vec<u32>,
+}
+
 pub struct Reconciler {
     spec: UniquePtr<Spec>,
     stages: Vec<Stage>,
     roots: Roots,
     owned: BTreeMap<String, Owned>,
+    moved: BTreeMap<Task, Moved>,
     last: BTreeMap<String, String>,
+    saved: String,
 }
 
 impl Reconciler {
@@ -123,14 +135,18 @@ impl Reconciler {
             stages,
             roots,
             owned: BTreeMap::new(),
+            moved: BTreeMap::new(),
             last: BTreeMap::new(),
+            saved: String::new(),
         })
     }
 
     /// One pass. Returns what changed since the last pass, one line each.
     pub fn pass(&mut self) -> Vec<String> {
         let mut out = Vec::new();
-        let held = ffi::bindings();
+        let held = ffi::held_stages();
+        self.moved
+            .retain(|task, m| ffi::task_starttime(m.pid, task.tid) == task.start);
         for (index, st) in self.stages.clone().iter().enumerate() {
             if st.external {
                 continue;
@@ -160,22 +176,72 @@ impl Reconciler {
             let state = format!("not written ({why}); cyra status cannot see these stages");
             self.note(&mut out, "record", state);
         }
+        self.save(&mut out);
         out
     }
 
-    /// Put every thread this daemon set back to what it ran at before, and drop its record.
+    /// Put every thread this daemon set or moved back to what it ran at before, and drop its
+    /// record.
     pub fn restore(&mut self) -> Vec<String> {
         let owned = std::mem::take(&mut self.owned);
-        let out = owned.iter().map(|(key, o)| put_back(key, o)).collect();
+        let mut out: Vec<String> = owned.iter().map(|(key, o)| put_back(key, o)).collect();
+        for (task, m) in std::mem::take(&mut self.moved) {
+            out.push(move_back(task, &m));
+        }
         ffi::record(&[]);
+        self.save(&mut out);
         out
     }
 
-    /// Take over the threads `older` set for stages this file still matches the same way; put the
-    /// rest back. How a reload avoids dropping every matched thread to its default in between.
-    pub fn adopt(&mut self, older: &mut Reconciler) -> Vec<String> {
+    /// Take over what a crashed run left in the state file, as a reload takes over from the old
+    /// file. Call once, before the first pass.
+    pub fn recover(&mut self) -> Vec<String> {
+        let text = match state::read() {
+            Ok(Some(t)) => t,
+            Ok(None) => return Vec::new(),
+            Err(e) => return vec![format!("state: not read ({e})")],
+        };
+        let mut lines = text.lines();
+        if lines.next() != Some(STATE_HEAD) {
+            return vec!["state: not a cyrad state file; ignored".to_owned()];
+        }
         let mut out = Vec::new();
-        for (key, o) in std::mem::take(&mut older.owned) {
+        let mut owned = BTreeMap::new();
+        let mut moved = BTreeMap::new();
+        for line in lines {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let parsed = match fields[..] {
+                ["owned", ..] => parse_owned(&fields)
+                    .map(|(k, o)| owned.insert(k, o))
+                    .is_some(),
+                ["moved", ..] => parse_moved(&fields)
+                    .map(|(t, m)| moved.insert(t, m))
+                    .is_some(),
+                _ => false,
+            };
+            if !parsed {
+                out.push(format!("state: line not understood, skipped: {line}"));
+            }
+        }
+        out.extend(self.take_over(owned, moved));
+        out
+    }
+
+    /// Take over what `older` set for stages this file still declares the same way; put the rest
+    /// back. How a reload avoids dropping every thread to its default in between.
+    pub fn adopt(&mut self, older: &mut Reconciler) -> Vec<String> {
+        let owned = std::mem::take(&mut older.owned);
+        let moved = std::mem::take(&mut older.moved);
+        self.take_over(owned, moved)
+    }
+
+    fn take_over(
+        &mut self,
+        owned: BTreeMap<String, Owned>,
+        moved: BTreeMap<Task, Moved>,
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+        for (key, o) in owned {
             let same = self
                 .stages
                 .iter()
@@ -186,7 +252,63 @@ impl Reconciler {
                 out.push(put_back(&key, &o));
             }
         }
+        for (task, m) in moved {
+            let kept = self
+                .stages
+                .iter()
+                .any(|s| s.key == m.stage && !s.children_cpus.is_empty());
+            if kept {
+                self.moved.insert(task, m);
+            } else {
+                out.push(move_back(task, &m));
+            }
+        }
         out
+    }
+
+    fn state_text(&self) -> String {
+        let mut t = format!("{STATE_HEAD}\n");
+        for (key, o) in &self.owned {
+            let (s, m) = (&o.original, &o.matcher);
+            t += &format!(
+                "owned\t{key}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                o.pid,
+                o.tid,
+                o.start,
+                s.policy,
+                s.priority,
+                join_cpus(&s.cpus),
+                u8::from(s.reset_on_fork),
+                m.irq,
+                m.process,
+                m.thread
+            );
+        }
+        for (task, m) in &self.moved {
+            t += &format!(
+                "moved\t{}\t{}\t{}\t{}\t{}\n",
+                m.stage,
+                m.pid,
+                task.tid,
+                task.start,
+                join_cpus(&m.original)
+            );
+        }
+        t
+    }
+
+    fn save(&mut self, out: &mut Vec<String>) {
+        let text = self.state_text();
+        if text == self.saved {
+            return;
+        }
+        match state::write(&text) {
+            Ok(()) => self.saved = text,
+            Err(e) => {
+                let state = format!("not saved ({e}); a restart could not put back what it set");
+                self.note(out, "state", state);
+            }
+        }
     }
 
     fn note(&mut self, out: &mut Vec<String>, stage: &str, state: String) {
@@ -197,19 +319,19 @@ impl Reconciler {
         self.last.insert(stage.to_owned(), state);
     }
 
+    fn release(&mut self, key: &str, out: &mut Vec<String>) {
+        if let Some(o) = self.owned.remove(key) {
+            out.push(put_back(key, &o));
+        }
+    }
+
     fn set_matched(&mut self, index: usize, st: &Stage, out: &mut Vec<String>) {
         let key = &st.key;
-        let refusal = ffi::refusal(&self.spec, index);
-        if !refusal.is_empty() {
-            self.note(
-                out,
-                key,
-                format!("refused by preflight, not set:\n{refusal}"),
-            );
-            return;
-        }
         let (pid, tid) = match find_threads(&st.matcher, &self.roots)[..] {
-            [] => return self.note(out, key, "no thread matches".into()),
+            [] => {
+                self.release(key, out);
+                return self.note(out, key, "no thread matches".into());
+            }
             [one] => one,
             ref many => {
                 let at: Vec<String> = many.iter().map(|&(p, t)| at(p, t)).collect();
@@ -218,19 +340,38 @@ impl Reconciler {
                     many.len(),
                     at.join(", ")
                 );
+                self.release(key, out);
                 return self.note(out, key, state);
             }
         };
         let start = ffi::task_starttime(pid, tid);
-        let known = self
+        if self
             .owned
             .get(key)
-            .is_some_and(|o| o.tid == tid && o.start == start);
-        if !known {
+            .is_some_and(|o| o.tid != tid || o.start != start)
+        {
+            self.release(key, out);
+        }
+        let refusal = ffi::refusal(&self.spec, index, tid);
+        if !refusal.is_empty() {
+            self.release(key, out);
+            let state = format!("refused by preflight, not set:\n{refusal}");
+            return self.note(out, key, state);
+        }
+        if !self.owned.contains_key(key) {
             let original = match ffi::observe(tid) {
                 Ok(s) => s,
                 Err(e) => return self.note(out, key, format!("cannot read {}: {e}", at(pid, tid))),
             };
+            // Only these can be put back; a thread taken from BATCH, IDLE or DEADLINE could not.
+            if ![libc::SCHED_OTHER, libc::SCHED_FIFO, libc::SCHED_RR].contains(&original.policy) {
+                let state = format!(
+                    "{} runs policy {}, which cyrad cannot put back; not set",
+                    at(pid, tid),
+                    original.policy
+                );
+                return self.note(out, key, state);
+            }
             let o = Owned {
                 pid,
                 tid,
@@ -244,16 +385,25 @@ impl Reconciler {
             return self.note(out, key, format!("set on {}", at(pid, tid)));
         }
         let state = match ffi::apply(&self.spec, index, tid) {
+            Ok(()) if ffi::task_starttime(pid, tid) != start => {
+                self.owned.remove(key);
+                format!(
+                    "tid {tid} ended while being set; whatever reuses it may now carry the stage"
+                )
+            }
             Ok(()) => format!("set on {}", at(pid, tid)),
             Err(e) => format!("cannot set on {}: {e}", at(pid, tid)),
         };
         self.note(out, key, state);
     }
 
-    fn watch_bound(&mut self, index: usize, st: &Stage, held: &[Binding], out: &mut Vec<String>) {
+    fn watch_bound(&mut self, index: usize, st: &Stage, held: &[HeldStage], out: &mut Vec<String>) {
         let mut declared = st.cpus.clone();
         declared.sort_unstable();
-        for b in held {
+        let mut wanted = st.children_cpus.clone();
+        wanted.sort_unstable();
+        for h in held {
+            let b = &h.binding;
             if b.node != st.node || b.group != st.group || b.name != st.name {
                 continue;
             }
@@ -270,24 +420,43 @@ impl Reconciler {
             }
             let tasks = self.roots.proc.join(b.pid.to_string()).join("task");
             for tid in numeric_entries(&tasks) {
-                if held.iter().any(|h| h.tid == tid) {
+                let start = ffi::task_starttime(b.pid, tid);
+                let task = Task { tid, start };
+                if start == 0 || h.earlier.contains(&task) {
+                    continue;
+                }
+                if held.iter().any(|x| x.binding.tid == tid) {
+                    self.moved.remove(&task); // it holds a stage of its own now
                     continue;
                 }
                 let Ok(ts) = ffi::observe(tid) else {
                     continue;
                 };
-                // An unset child still carries the affinity it inherited: exactly the stage's cpus.
-                if ts.policy != libc::SCHED_OTHER || ts.cpus != declared {
+                if self.moved.get(&task).is_some_and(|m| m.stage == st.key) {
+                    // Moved before: it follows children_cpus through a reload, and back from a
+                    // move by someone else.
+                    if ts.cpus == wanted {
+                        continue;
+                    }
+                } else if ts.policy != libc::SCHED_OTHER || ts.cpus != declared {
+                    // A reset child still carries the affinity it inherited: the stage's cpus.
                     continue;
                 }
-                out.push(match ffi::move_to(tid, &st.children_cpus) {
-                    Ok(()) => format!(
-                        "{}: moved child {} off the stage's cpus",
-                        st.key,
-                        at(b.pid, tid)
-                    ),
+                let line = match ffi::move_to(tid, &st.children_cpus) {
+                    Ok(()) if ffi::task_starttime(b.pid, tid) != start => {
+                        format!("{}: tid {tid} ended while being moved", st.key)
+                    }
+                    Ok(()) => {
+                        self.moved.entry(task).or_insert(Moved {
+                            stage: st.key.clone(),
+                            pid: b.pid,
+                            original: ts.cpus.clone(),
+                        });
+                        format!("{}: moved child {} to {wanted:?}", st.key, at(b.pid, tid))
+                    }
                     Err(e) => format!("{}: cannot move child {}: {e}", st.key, at(b.pid, tid)),
-                });
+                };
+                out.push(line);
             }
         }
     }
@@ -301,4 +470,84 @@ fn put_back(key: &str, o: &Owned) -> String {
         Ok(()) => format!("{key}: put back on {}", at(o.pid, o.tid)),
         Err(e) => format!("{key}: cannot put back {}: {e}", at(o.pid, o.tid)),
     }
+}
+
+fn move_back(task: Task, m: &Moved) -> String {
+    let child = at(m.pid, task.tid);
+    if ffi::task_starttime(m.pid, task.tid) != task.start {
+        return format!("{}: child {child} gone, nothing to move back", m.stage);
+    }
+    match ffi::move_to(task.tid, &m.original) {
+        Ok(()) => format!("{}: moved child {child} back to {:?}", m.stage, m.original),
+        Err(e) => format!("{}: cannot move child {child} back: {e}", m.stage),
+    }
+}
+
+fn join_cpus(cpus: &[u32]) -> String {
+    cpus.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn parse_cpus(field: &str) -> Option<Vec<u32>> {
+    if field.is_empty() {
+        return Some(Vec::new());
+    }
+    field.split(',').map(|c| c.parse().ok()).collect()
+}
+
+fn parse_owned(f: &[&str]) -> Option<(String, Owned)> {
+    let [
+        _,
+        key,
+        pid,
+        tid,
+        start,
+        policy,
+        priority,
+        cpus,
+        reset,
+        irq,
+        process,
+        thread,
+    ] = f
+    else {
+        return None;
+    };
+    let original = ThreadState {
+        policy: policy.parse().ok()?,
+        priority: priority.parse().ok()?,
+        cpus: parse_cpus(cpus)?,
+        reset_on_fork: *reset == "1",
+    };
+    let matcher = Match {
+        irq: (*irq).to_owned(),
+        process: (*process).to_owned(),
+        thread: (*thread).to_owned(),
+    };
+    let o = Owned {
+        pid: pid.parse().ok()?,
+        tid: tid.parse().ok()?,
+        start: start.parse().ok()?,
+        original,
+        matcher,
+    };
+    Some(((*key).to_owned(), o))
+}
+
+fn parse_moved(f: &[&str]) -> Option<(Task, Moved)> {
+    let [_, stage, pid, tid, start, cpus] = f else {
+        return None;
+    };
+    let task = Task {
+        tid: tid.parse().ok()?,
+        start: start.parse().ok()?,
+    };
+    let m = Moved {
+        stage: (*stage).to_owned(),
+        pid: pid.parse().ok()?,
+        original: parse_cpus(cpus)?,
+    };
+    Some((task, m))
 }

@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::thread::{self, JoinHandle};
@@ -73,12 +73,18 @@ struct Target {
 
 impl Target {
     fn new(name: &str) -> Self {
+        Self::with(name, || {})
+    }
+
+    /// The same, running `setup` on itself before it reports.
+    fn with(name: &str, setup: fn()) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
         let flag = Arc::clone(&stop);
         let handle = thread::Builder::new()
             .name(name.to_owned())
             .spawn(move || {
+                setup();
                 tx.send(ffi::this_tid()).unwrap();
                 while !flag.load(Ordering::Relaxed) {
                     thread::sleep(Duration::from_millis(1));
@@ -90,6 +96,10 @@ impl Target {
             stop,
             handle: Some(handle),
         }
+    }
+
+    fn rename(&self, name: &str) {
+        fs::write(format!("/proc/self/task/{}/comm", self.tid), name).unwrap();
     }
 }
 
@@ -217,7 +227,7 @@ fn a_preflight_refusal_sets_nothing() {
          priority: 99\n",
         self_comm()
     ));
-    if ffi::refusal(&ffi::load(&f.path).unwrap(), 0).is_empty() {
+    if ffi::refusal(&ffi::load(&f.path).unwrap(), 0, target.tid).is_empty() {
         eprintln!("skipped: cyra-cap:rtprio this host grants priority 99");
         return;
     }
@@ -227,28 +237,159 @@ fn a_preflight_refusal_sets_nothing() {
     assert_ne!(ffi::observe(target.tid).unwrap().policy, libc::SCHED_FIFO);
 }
 
-const HOLDER: &str = "CYRAD_TEST_HOLDER";
+// A matched stage is the daemon's only while it names exactly one thread. When the match goes
+// ambiguous or moves to another thread, the thread set before goes back first.
+#[test]
+fn a_matched_thread_goes_back_when_the_match_is_lost() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let a = Target::new("cyrad_t_lose");
+    let original = ffi::observe(a.tid).unwrap().cpus;
+    let f = SpecFile::new(&match_spec("cyrad_t_lose", last));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    rec.pass();
+    assert_eq!(ffi::observe(a.tid).unwrap().cpus, [last]);
 
-/// Not a test of its own: the process moves_reset_children_off_the_stages_cpus starts to hold a
-/// stage the way a node that binds does. Returns at once unless that test started it.
+    let b = Target::new("cyrad_t_lose");
+    let lines = rec.pass();
+    assert!(contains(&lines, "refusing to guess"), "{lines:?}");
+    assert_eq!(
+        ffi::observe(a.tid).unwrap().cpus,
+        original,
+        "an ambiguous match left the thread set before on the stage's cpus"
+    );
+
+    a.rename("cyrad_t_gone");
+    rec.pass();
+    assert_eq!(ffi::observe(b.tid).unwrap().cpus, [last]);
+    rec.restore();
+    assert_eq!(ffi::observe(a.tid).unwrap().cpus, original);
+    assert_eq!(ffi::observe(b.tid).unwrap().cpus, original);
+}
+
+#[test]
+fn a_matched_thread_goes_back_when_the_match_moves_to_another() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let a = Target::new("cyrad_t_move");
+    let original = ffi::observe(a.tid).unwrap().cpus;
+    let f = SpecFile::new(&match_spec("cyrad_t_move", last));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    rec.pass();
+
+    a.rename("cyrad_t_other");
+    let b = Target::new("cyrad_t_move");
+    let lines = rec.pass();
+    assert!(contains(&lines, "put back"), "{lines:?}");
+    assert_eq!(ffi::observe(a.tid).unwrap().cpus, original);
+    assert_eq!(ffi::observe(b.tid).unwrap().cpus, [last]);
+    rec.restore();
+    assert_eq!(ffi::observe(b.tid).unwrap().cpus, original);
+}
+
+// cyrad restores only SCHED_OTHER, SCHED_FIFO and SCHED_RR, so it does not take a thread from any
+// other policy.
+#[test]
+fn a_thread_cyrad_could_not_put_back_is_not_set() {
+    let _serial = serial();
+    #[allow(unsafe_code)]
+    fn to_batch() {
+        let p = libc::sched_param { sched_priority: 0 };
+        // SAFETY: a syscall on the calling thread with a valid parameter.
+        assert_eq!(
+            unsafe { libc::sched_setscheduler(0, libc::SCHED_BATCH, &p) },
+            0
+        );
+    }
+    let t = Target::with("cyrad_t_batch", to_batch);
+    let f = SpecFile::new(&match_spec("cyrad_t_batch", *cpus().last().unwrap()));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let lines = rec.pass();
+    assert!(contains(&lines, "cannot put back; not set"), "{lines:?}");
+    assert_eq!(ffi::observe(t.tid).unwrap().policy, libc::SCHED_BATCH);
+    assert!(rec.restore().is_empty());
+}
+
+const HOLDER: &str = "CYRAD_TEST_HOLDER";
+const HOLDER_CPU: &str = "CYRAD_TEST_HOLDER_CPU";
+
+/// Not a test of its own: a process the tests below start to hold /holder the way a node that
+/// binds does. `child` starts a thread after the bind; `earlier` has a thread from before the
+/// bind pin itself to the stage's cpu. Returns at once unless a test started it.
 #[test]
 fn holder() {
-    if env::var_os(HOLDER).is_none() {
+    let Ok(role) = env::var(HOLDER) else {
         return;
-    }
-    ffi::bind("/holder").unwrap();
-    let holder = ffi::this_tid();
+    };
     let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
+    let park = move || {
         tx.send(ffi::this_tid()).unwrap();
         loop {
             thread::park();
         }
-    });
-    println!("tids {holder} {}", rx.recv().unwrap());
+    };
+    let other = if role == "earlier" {
+        let cpu: u32 = env::var(HOLDER_CPU).unwrap().parse().unwrap();
+        thread::spawn(move || {
+            ffi::move_to(ffi::this_tid(), &[cpu]).unwrap();
+            park();
+        });
+        let other = rx.recv().unwrap();
+        ffi::bind("/holder").unwrap();
+        other
+    } else {
+        ffi::bind("/holder").unwrap();
+        thread::spawn(park);
+        rx.recv().unwrap()
+    };
+    println!("tids {} {other}", ffi::this_tid());
     loop {
         thread::park();
     }
+}
+
+struct Holder {
+    proc: Child,
+    holder: i32,
+    other: i32,
+}
+
+impl Holder {
+    fn start(role: &str, spec: &SpecFile, cpu: u32) -> Self {
+        let mut proc = Command::new(env::current_exe().unwrap())
+            .args(["holder", "--exact", "--nocapture"])
+            .env(HOLDER, role)
+            .env(HOLDER_CPU, cpu.to_string())
+            .env("CYRA_SPEC", &spec.path)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let line = BufReader::new(proc.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .find(|l| l.starts_with("tids "))
+            .expect("the holder process did not report its threads");
+        let tids: Vec<i32> = line[5..].split(' ').map(|t| t.parse().unwrap()).collect();
+        Self {
+            proc,
+            holder: tids[0],
+            other: tids[1],
+        }
+    }
+}
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        let _ = self.proc.kill();
+        let _ = self.proc.wait();
+    }
+}
+
+fn holder_spec(cpu: u32, children: u32) -> SpecFile {
+    SpecFile::new(&format!(
+        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /holder\n        \
+         cpus: [{cpu}]\n        children_cpus: [{children}]\n"
+    ))
 }
 
 // A stage a thread binds for itself is the thread's; the daemon moves its reset children off its
@@ -257,39 +398,129 @@ fn holder() {
 fn moves_reset_children_off_the_stages_cpus() {
     let _serial = serial();
     let all = cpus();
-    if all.len() < 2 {
-        eprintln!("skipped: cyra-cap:two-cpus needs a cpu for the children");
+    if all.len() < 3 {
+        eprintln!("skipped: cyra-cap:three-cpus needs cpus for the stage and its children");
         return;
     }
     let (first, last) = (all[0], *all.last().unwrap());
-    let f = SpecFile::new(&format!(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /holder\n        \
-         cpus: [{first}]\n        children_cpus: [{last}]\n"
-    ));
-    let mut proc = Command::new(env::current_exe().unwrap())
-        .args(["holder", "--exact", "--nocapture"])
-        .env(HOLDER, "1")
-        .env("CYRA_SPEC", &f.path)
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let line = BufReader::new(proc.stdout.take().unwrap())
-        .lines()
-        .map_while(Result::ok)
-        .find(|l| l.starts_with("tids "))
-        .expect("the holder process did not report its threads");
-    let tids: Vec<i32> = line[5..].split(' ').map(|t| t.parse().unwrap()).collect();
-
+    let f = holder_spec(first, last);
+    let h = Holder::start("child", &f, first);
     let mut rec = Reconciler::load(&f.path).unwrap();
     let lines = rec.pass();
-    let child_cpus = ffi::observe(tids[1]).unwrap().cpus;
-    let holder_cpus = ffi::observe(tids[0]).unwrap().cpus;
-    proc.kill().unwrap();
-    proc.wait().unwrap();
-
     assert!(contains(&lines, "moved child"), "{lines:?}");
-    assert_eq!(child_cpus, [last]);
-    assert_eq!(holder_cpus, [first], "the holder is not the daemon's");
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [last]);
+    assert_eq!(
+        ffi::observe(h.holder).unwrap().cpus,
+        [first],
+        "the holder is not the daemon's"
+    );
+}
+
+// The kernel does not say which thread started which. A thread the process had before the bind is
+// not a child of the stage, whatever cpus it chose for itself.
+#[test]
+fn children_cpus_leaves_threads_from_before_the_bind() {
+    let _serial = serial();
+    let all = cpus();
+    if all.len() < 3 {
+        eprintln!("skipped: cyra-cap:three-cpus needs cpus for the stage and its children");
+        return;
+    }
+    let (first, last) = (all[0], *all.last().unwrap());
+    let f = holder_spec(first, last);
+    let h = Holder::start("earlier", &f, first);
+    let lines = Reconciler::load(&f.path).unwrap().pass();
+    assert!(!contains(&lines, "moved child"), "{lines:?}");
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [first]);
+}
+
+// What cyrad moved it remembers: a stop moves it back, and a reload with other children_cpus
+// moves it there.
+#[test]
+fn moved_children_follow_a_reload_and_go_back_on_stop() {
+    let _serial = serial();
+    let all = cpus();
+    if all.len() < 3 {
+        eprintln!("skipped: cyra-cap:three-cpus needs cpus for the stage and its children");
+        return;
+    }
+    let (first, mid, last) = (all[0], all[1], *all.last().unwrap());
+    let f = holder_spec(first, last);
+    let h = Holder::start("child", &f, first);
+    let mut older = Reconciler::load(&f.path).unwrap();
+    older.pass();
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [last]);
+
+    let g = holder_spec(first, mid);
+    let mut newer = Reconciler::load(&g.path).unwrap();
+    newer.adopt(&mut older);
+    let lines = newer.pass();
+    assert!(contains(&lines, "moved child"), "{lines:?}");
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [mid]);
+
+    let lines = newer.restore();
+    assert!(contains(&lines, "moved child"), "{lines:?}");
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [first]);
+}
+
+// A cyrad killed without its stop leaves the state file behind. The next one takes over from it,
+// so a stop puts the thread back where it started, not where the killed run left it.
+#[test]
+fn a_restart_after_a_crash_still_puts_back_the_original() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let t = Target::new("cyrad_t_crash");
+    let original = ffi::observe(t.tid).unwrap().cpus;
+    let f = SpecFile::new(&match_spec("cyrad_t_crash", last));
+    let mut crashed = Reconciler::load(&f.path).unwrap();
+    crashed.pass();
+    drop(crashed); // no restore: killed
+
+    let mut next = Reconciler::load(&f.path).unwrap();
+    next.recover();
+    next.pass();
+    assert_eq!(ffi::observe(t.tid).unwrap().cpus, [last]);
+    let lines = next.restore();
+    assert!(contains(&lines, "put back"), "{lines:?}");
+    assert_eq!(ffi::observe(t.tid).unwrap().cpus, original);
+}
+
+// What the crashed run set for a stage the new file no longer has goes back at once.
+#[test]
+fn a_restart_puts_back_what_the_new_file_dropped() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let t = Target::new("cyrad_t_left");
+    let original = ffi::observe(t.tid).unwrap().cpus;
+    let f = SpecFile::new(&match_spec("cyrad_t_left", last));
+    Reconciler::load(&f.path).unwrap().pass();
+
+    let g = SpecFile::new(&match_spec("cyrad_t_other", last));
+    let lines = Reconciler::load(&g.path).unwrap().recover();
+    assert!(contains(&lines, "tgt: put back"), "{lines:?}");
+    assert_eq!(ffi::observe(t.tid).unwrap().cpus, original);
+}
+
+#[test]
+fn a_restart_after_a_crash_still_moves_children_back() {
+    let _serial = serial();
+    let all = cpus();
+    if all.len() < 3 {
+        eprintln!("skipped: cyra-cap:three-cpus needs cpus for the stage and its children");
+        return;
+    }
+    let (first, last) = (all[0], *all.last().unwrap());
+    let f = holder_spec(first, last);
+    let h = Holder::start("child", &f, first);
+    Reconciler::load(&f.path).unwrap().pass();
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [last]);
+
+    let mut next = Reconciler::load(&f.path).unwrap();
+    next.recover();
+    next.pass();
+    let lines = next.restore();
+    assert!(contains(&lines, "moved child"), "{lines:?}");
+    assert_eq!(ffi::observe(h.other).unwrap().cpus, [first]);
 }
 
 // Interrupt threads are named irq/<n>-<handler>: whole on kernels since 5.17, cut to 15 bytes
