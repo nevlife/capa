@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 
 // The schedule is not in this file. A chain spans processes, and no node can see the ordering
@@ -60,22 +61,22 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<StageNode>();
+  int rc = 0;
+  try {
+    auto node = std::make_shared<StageNode>();
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
-  ex.add(node->subscription(), node->group());
+    flux::ros::PartitionedExecutor ex;
+    ex.add_ros_node(node);
+    ex.add(node->subscription(), node->group());
 
-  const cyra::Spec spec = cyra::Spec::load();
-  if (spec.empty()) {
-    RCLCPP_WARN(node->get_logger(), "CYRA_SPEC is unset: running with no declared schedule");
-  } else {
-    const cyra::Stage & stage =
-      spec.stage(node->get_fully_qualified_name(), StageNode::kGroupLabel);
-    cyra::flux::schedule(ex, *node, node->group(), stage);
-    RCLCPP_INFO(
-      node->get_logger(), "chain %s stage %s/%s", stage.chain.c_str(), stage.node.c_str(),
-      stage.group.c_str());
+    // The whole schedule of this thread is in the file CYRA_SPEC names; the code only says which
+    // stage the group is. Unset, this registers nothing.
+    cyra::flux::bind(ex, *node, node->group(), StageNode::kGroupLabel);
+
+    const cyra::Spec spec = cyra::Spec::load();
+    if (spec.empty()) {
+      RCLCPP_WARN(node->get_logger(), "CYRA_SPEC is unset: running with no declared schedule");
+    }
     // The stages cyra does not set are still part of the chain, and checking them is the only
     // thing it can do for them.
     for (const cyra::Stage * e : spec.external()) {
@@ -83,9 +84,13 @@ int main(int argc, char ** argv)
         node->get_logger(), "external stage %s expects priority %d", e->node.c_str(),
         e->expect_priority);
     }
-  }
 
-  ex.spin();
+    // A refused stage ends the spin with the reason rather than running at the wrong priority.
+    ex.spin();
+  } catch (const std::exception & e) {
+    std::fprintf(stderr, "chain: %s\n", e.what());
+    rc = 1;
+  }
   rclcpp::shutdown();
-  return 0;
+  return rc;
 }

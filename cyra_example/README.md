@@ -1,6 +1,6 @@
 # cyra_example
 
-Thread scheduling. C++ only. Python is not an RT target. The GIL and GC are unbounded sources of latency, so no bound can be promised there.
+Thread scheduling. C++ only: Python is not an RT target, since the GIL and GC are unbounded sources of latency.
 
 ```bash
 ros2 run cyra_example preflight
@@ -11,7 +11,7 @@ ros2 run cyra_example chain
 
 ## preflight, ask before applying
 
-`apply()` succeeds if the kernel accepts. The kernel readily accepts a host that cannot meet the deadline. `preflight()` judges, before touching anything, whether this host can sustain that schedule. The judgment is based entirely on what the kernel reports (rlimit, `/proc`, `/sys`), not on estimates.
+The kernel accepts a request on a host that cannot hold a deadline. `preflight()` judges, before touching anything, whether this host can sustain the schedule. Every verdict comes from what the kernel reports (rlimit, `/proc`, `/sys`).
 
 ```cpp
 cyra::Options opts;
@@ -21,29 +21,19 @@ opts.cpus = {2};
 const cyra::Report report = cyra::preflight(opts, 90);
 ```
 
-Without `control_priority` the `priority-order` check comes out as `Unknown`. A check that did not run must not look the same as one that passed.
+Without `control_priority` the `priority-order` check is `Unknown`. A check that did not run must not look like one that passed. `Fail` means the request cannot hold as stated and blocks under both soft and hard. `Warn` means the request takes effect but the host is not configured for bounded latency: soft reports it, hard refuses it.
 
-`Fail` means the request cannot hold as stated and blocks under both soft and hard. `Warn` means the request is accepted but the host is not a bounded latency configuration, so soft passes over it and hard refuses.
+## chain, one line per thread
 
-## chain, the declaration in one file
-
-A chain crosses processes. No node can see on its own the order its configuration must respect. So the declaration is written in one file and each node looks up only its own share at startup. Nothing pushes, so it holds even when nodes are started and killed separately by launch.
+A chain crosses processes, and no node can see the order its own settings must respect. The schedule lives in one file, and each node only says which stage its thread is.
 
 ```cpp
-const cyra::Spec spec = cyra::Spec::load();   // CYRA_SPEC
-const cyra::Stage & stage = spec.stage(node->get_fully_qualified_name(), "work");
-cyra::flux::schedule(ex, *node, node->group(), stage);
+cyra::flux::bind(ex, *node, node->group(), "work");
 ```
 
-`schedule` registers the executor's `on_thread_start` hook. The child thread that owns that group applies it to itself before the first callback. A thread can only apply to itself, so without this order there is a window where a callback runs once at the wrong priority.
+The child thread serving the group applies the stage to itself before its first callback, and a refusal ends `spin()` with the reason. Without `CYRA_SPEC` nothing is registered.
 
-The stage is passed whole. `strict` and `control_priority` are values no node can derive alone, and unpacking them into fields leaks them at that spot.
-
-Without `CYRA_SPEC` the spec is empty and a no-op.
-
-## Declaration file
-
-It is `config/perception_to_control.yaml`.
+The file is `config/perception_to_control.yaml`:
 
 ```yaml
 chains:
@@ -58,11 +48,14 @@ chains:
         policy: fifo
         priority: 70
         cpus: [2]
+      - node: /flux_control
+        group: loop
+        policy: fifo
+        priority: 90
+        cpus: [3]
 ```
 
-- `stages` is the order the data flows. RT priority must increase in that direction. If upstream preempts downstream it starves it.
-- `external` is a stage cyra does not apply. It is someone else's thread, such as an rmw listener. Only `expect_priority` may be written, and passing it to `schedule` is refused. All cyra does about it is `verify()`.
-- Unknown keys are refused. There is no version field.
-- With `target: hard` every RT stage must get its own core. Two pinned to the same core are refused. `SCHED_FIFO` has no timeslice, so one blocks the other completely.
+- `external` is a thread cyra does not set. `verify()` is all cyra does for it.
+- The rules for the file (flow, release, criticality, hard cores, children) are in `docs/en/api.en.md` section 2.
 
-`chain` hits `RLIMIT_RTPRIO` unless run as root. `preflight` says so first.
+`chain` needs `RLIMIT_RTPRIO` of at least 70 unless run as root. `preflight` says so first.

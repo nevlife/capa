@@ -1,0 +1,25 @@
+[package]
+name = "cyrad"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "cyrad"
+path = "src/main.rs"
+
+[dependencies]
+cxx = "1"
+libc = "0.2"
+
+[build-dependencies]
+cxx-build = "1"
+
+# Unsafe code is refused except where a module allows it: the bridge and the signal mask.
+[lints.rust]
+unsafe_code = "deny"

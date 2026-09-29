@@ -37,13 +37,34 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/nanobind
 nanobind_add_module(_cyra NB_STATIC src/cyra_py.cpp)
 target_link_libraries(_cyra PRIVATE cyra_core::cyra_core)
 
+# The stub is tracked in cyra/_cyra.pyi so type checkers and editors see it without a build.
+# The build regenerates it, and test_stub.py fails when the two differ.
+nanobind_add_stub(
+  _cyra_stub
+  MODULE _cyra
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/_cyra.pyi
+  PYTHON_PATH $<TARGET_FILE_DIR:_cyra>
+  DEPENDS _cyra)
+
 install(TARGETS _cyra LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}/cyra")
-install(FILES cyra/__init__.py cyra/flux.py DESTINATION "${PYTHON_INSTALL_DIR}/cyra")
+install(FILES cyra/__init__.py cyra/flux.py cyra/_cyra.pyi cyra/py.typed
+        DESTINATION "${PYTHON_INSTALL_DIR}/cyra")
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
-  ament_add_pytest_test(test_rt test/test_rt.py)
-  ament_add_pytest_test(test_flux test/test_flux.py)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/run)
+  ament_add_pytest_test(test_rt test/test_rt.py ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
+  ament_add_pytest_test(test_flux test/test_flux.py ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
+  ament_add_pytest_test(test_surface test/test_surface.py)
+  ament_add_pytest_test(test_doc_examples test/test_doc_examples.py)
+  # The repository checks that need no build, run here as well so colcon test holds them without
+  # pre-commit installed.
+  foreach(check check_api_docs check_contracts check_doc_examples)
+    add_test(NAME ${check}
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/${check}.py)
+  endforeach()
+  ament_add_pytest_test(test_stub test/test_stub.py
+    ENV CYRA_STUB_BUILT=${CMAKE_CURRENT_BINARY_DIR}/_cyra.pyi)
 endif()
 
 ament_package()

@@ -1,0 +1,41 @@
+# cyra 계약
+
+C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테스트를 행마다 적는다. `scripts/check_contracts.py`는 적힌 테스트가 없거나, id가 겹치거나, 이 파일과 `docs/en/contracts.en.md`의 id·테스트가 다르면 실패한다.
+
+새 약속은 사용자 문서에 적기 전에 행부터 만든다.
+
+## 1. 양쪽
+
+| id | 계약 | C++ | Python |
+| --- | --- | --- | --- |
+| X-001 | CYRA_SPEC이 없으면 bind는 아무것도 안 하고 빈 report를 돌려준다 | `Bind.WithoutASpecItDoesNothing` | `test_bind_without_a_spec_does_nothing` |
+| X-002 | bind는 호출한 스레드를 stage에 걸고 커널에서 되읽는다 | `Bind.PutsTheCallingThreadOnItsStage` | `test_bind_puts_the_calling_thread_on_its_stage` |
+| X-003 | 파일에 없는 라벨은 무시하지 않고 거절한다 | `Bind.ATypoIsRefusedNotIgnored` | `test_bind_refuses_an_unknown_label` |
+| X-004 | spawn은 스레드가 걸린 뒤에만 함수를 돌린다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
+| X-005 | 거절된 spawn은 호출자에게 던지고 함수를 돌리지 않는다 | `Spawn.ARefusalReachesTheCallerAndTheFunctionNeverRuns` | `test_spawn_raises_the_refusal_and_never_runs_the_function` |
+| X-006 | children=reset이면 자식은 SCHED_OTHER로, inherit이면 부모 정책으로 시작한다 | `Rt.ChildrenFollowTheDeclaredPolicy` | `test_children_follow_the_declared_policy` |
+| X-007 | 아무것도 요청하지 않는 Options는 판정까지 포함해 아무것도 안 한다 | `Rt.ApplyCheckedIsANoOpForOptionsThatAskNothing` | `test_an_empty_request_is_a_no_op` |
+| X-008 | 다르게 해석될 요청은 잘라 맞추지 않고 거절한다 | `Rt.ValidateRejectsReinterpretableCombos` | `test_an_out_of_range_priority_is_rejected` |
+| X-009 | preflight가 Fail한 요청은 스레드를 건드리기 전에 거절한다 | `Rt.ApplyCheckedRefusesWhatPreflightFails` | `test_a_cpu_this_host_does_not_have_is_refused` |
+| X-010 | 한 stage는 살아 있는 스레드 하나가 쥔다. 쥔 스레드는 다시 걸 수 있고 끝나면 풀린다 | `Spec.OneStageIsHeldByOneLiveThread` | `test_one_stage_is_held_by_one_live_thread` |
+| X-011 | stage는 노드 전체 이름과 라벨로 찾고, 없는 라벨은 던진다 | `Spec.LookupByNodeRejectsAnUnknownLabel` | `test_a_stage_is_looked_up_by_node_and_label` |
+| X-012 | external stage는 거는 진입점 전부가 거절한다 | `Chain.AnExternalStageIsRefusedByBothEntryPoints` | `test_an_external_stage_is_refused` |
+| X-013 | verify는 선언에서 벗어난 스레드를 Fail로 본다 | `Chain.VerifySeesADriftAwayFromTheDeclaration` | `test_verify_sees_a_drift_away_from_the_declaration` |
+| X-014 | verify_process는 stage를 쥔 스레드와 inherit 자식을 설명하고 나머지를 보고한다 | `Chain.VerifyProcessNamesOnlyTheThreadsTheFileCannotExplain` | `test_verify_process_names_only_threads_the_file_cannot_explain` |
+| X-015 | flux bind는 첫 콜백 전에 그룹 자식 스레드에 도달한다 | `Chain.DeclaredStagesReachTheirThreads` | `test_bind_reaches_the_group_child` |
+| X-016 | flux에 넘긴 stage는 함께 넘긴 노드를 가리켜야 한다 | `ScheduleStage.RejectsAStageWhoseNodeIsNotTheNodeHandedOver` | `test_a_stage_must_name_the_node_and_its_unit` |
+| X-017 | 어느 자식도 맡지 않는 그룹의 선언은 spin이 거절한다 | `Schedule.ScheduleRejects` | `test_a_declaration_for_an_unserved_unit_is_refused` |
+| X-018 | 허용된 RT 정책은 flux 자식 스레드에 도달한다 | `Schedule.ScheduleFifoMatchesPreflight` | `test_a_granted_policy_reaches_the_child` |
+| X-019 | 다른 프로세스는 어느 스레드가 stage를 쥐었는지 보고, 쥔 프로세스가 끝나면 사라진다 | `Record.AnotherProcessSeesTheStageAThreadHolds` | `test_another_process_sees_the_stage_a_thread_holds` |
+| X-020 | 데몬이 match하는 stage는 apply_checked와 bind가 거절한다 | `Bind.AMatchedStageIsRefused` | `test_a_matched_stage_is_refused` |
+
+## 2. 의도한 차이
+
+여기서는 한쪽이 `-`일 수 있지만 양쪽 다 `-`일 수는 없다. 이유는 `api.ko.md` 7절에 있다.
+
+| id | 계약 | C++ | Python |
+| --- | --- | --- | --- |
+| S-001 | spawn은 C++에서 std::thread, Python에서 시작된 threading.Thread를 준다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
+| S-002 | 그룹이 노드의 것인지는 C++만 확인한다 | `ScheduleStage.RejectsAGroupOfAnotherNode` | - |
+| S-003 | Python에서 group=None은 노드 단위(add_ros_node에 준 노드)다 | - | `test_a_node_child_runs_where_it_was_declared` |
+| S-004 | cyra.flux.apply_checked는 Options와 Stage를 함수 하나가 받는다 | - | `test_a_stage_reaches_the_group_child` |

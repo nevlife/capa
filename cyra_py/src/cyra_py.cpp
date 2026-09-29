@@ -1,4 +1,7 @@
-// cyra Python binding (nanobind): the applying half of cyra_core and the chain declaration file.
+// cyra Python binding (nanobind). Every name here is the cyra_core name of the same thing, and
+// nothing here decides anything cyra_core does not: a second implementation would be a second
+// place for the rules to drift. spawn() is the one exception and lives in cyra/__init__.py,
+// because a Python function has to run on a thread Python started.
 
 #include "cyra/rt.hpp"
 #include "cyra/spec.hpp"
@@ -16,6 +19,19 @@
 #include <vector>
 
 namespace nb = nanobind;
+using namespace nb::literals;
+
+namespace
+{
+
+std::string cpu_text(const std::vector<std::uint32_t> & cpus)
+{
+  std::string out;
+  for (auto c : cpus) out += (out.empty() ? "" : ",") + std::to_string(c);
+  return "[" + out + "]";
+}
+
+}  // namespace
 
 NB_MODULE(_cyra, m)
 {
@@ -36,94 +52,123 @@ NB_MODULE(_cyra, m)
     },
     nullptr);
 
-  // Bound rather than rewritten in ctypes. The rollback on a half-applied request and the
-  // read-back that catches an affinity a cpuset narrowed are the parts that are easy to get wrong
-  // and easy to leave out; a second implementation is a second place for them to drift.
-  //
-  // Only the applying half is here. The value form of `apply` runs preflight at Soft strictness,
-  // so a request the kernel cannot satisfy is refused with the reason, while a host that merely
-  // cannot hold a deadline is reported and applied. A stage carries its chain's strictness.
-
   nb::enum_<cyra::Policy>(m, "Policy")
-    .value("Inherit", cyra::Policy::Inherit, "Leave the scheduling class alone. The default.")
-    .value("Other", cyra::Policy::Other, "SCHED_OTHER: explicit return to the default class.")
-    .value(
-      "Fifo", cyra::Policy::Fifo,
-      "SCHED_FIFO: static priority, runs until it blocks or is preempted. Needs RLIMIT_RTPRIO or "
-      "CAP_SYS_NICE; without either this is refused, never downgraded.")
-    .value(
-      "RoundRobin", cyra::Policy::RoundRobin,
-      "SCHED_RR: Fifo plus a timeslice among equal priorities. Same permission.");
+    .value("Inherit", cyra::Policy::Inherit)
+    .value("Other", cyra::Policy::Other)
+    .value("Fifo", cyra::Policy::Fifo)
+    .value("RoundRobin", cyra::Policy::RoundRobin);
 
-  nb::class_<cyra::ThreadState>(m, "ThreadState", "What a thread actually runs at.")
-    .def_ro(
-      "policy", &cyra::ThreadState::policy,
-      "The raw SCHED_* number, not Policy: a thread may hold a class this enum does not name.")
+  nb::enum_<cyra::Children>(m, "Children")
+    .value("Reset", cyra::Children::Reset)
+    .value("Inherit", cyra::Children::Inherit);
+
+  nb::enum_<cyra::Strictness>(m, "Strictness")
+    .value("Soft", cyra::Strictness::Soft)
+    .value("Hard", cyra::Strictness::Hard);
+
+  nb::enum_<cyra::Verdict>(m, "Verdict")
+    .value("Ok", cyra::Verdict::Ok)
+    .value("Warn", cyra::Verdict::Warn)
+    .value("Fail", cyra::Verdict::Fail)
+    .value("Unknown", cyra::Verdict::Unknown);
+
+  nb::enum_<cyra::Kind>(m, "Kind")
+    .value("Worker", cyra::Kind::Worker)
+    .value("Release", cyra::Kind::Release);
+
+  nb::class_<cyra::Options>(m, "Options")
+    .def(
+      "__init__",
+      [](
+        cyra::Options * self, cyra::Policy policy, int priority, std::vector<std::uint32_t> cpus,
+        cyra::Children children) {
+        new (self) cyra::Options{policy, priority, std::move(cpus), children};
+      },
+      "policy"_a = cyra::Policy::Inherit, "priority"_a = 0, "cpus"_a = std::vector<std::uint32_t>{},
+      "children"_a = cyra::Children::Reset)
+    .def_rw("policy", &cyra::Options::policy)
+    .def_rw("priority", &cyra::Options::priority)
+    .def_rw("cpus", &cyra::Options::cpus)
+    .def_rw("children", &cyra::Options::children)
+    .def("validate", &cyra::Options::validate);
+
+  nb::class_<cyra::ThreadState>(m, "ThreadState")
+    .def_ro("policy", &cyra::ThreadState::policy, "The raw SCHED_* number; compare os.SCHED_FIFO.")
     .def_ro("priority", &cyra::ThreadState::priority)
-    .def_ro("cpus", &cyra::ThreadState::cpus, "The cores this thread may run on.")
+    .def_ro("cpus", &cyra::ThreadState::cpus)
+    .def_ro("reset_on_fork", &cyra::ThreadState::reset_on_fork)
     .def("__repr__", [](const cyra::ThreadState & st) {
-      std::string cpus;
-      for (auto c : st.cpus) cpus += (cpus.empty() ? "" : ",") + std::to_string(c);
       return "<cyra.ThreadState policy=" + std::to_string(st.policy) +
-             " priority=" + std::to_string(st.priority) + " cpus=[" + cpus + "]>";
+             " priority=" + std::to_string(st.priority) + " cpus=" + cpu_text(st.cpus) +
+             " reset_on_fork=" + (st.reset_on_fork ? "True" : "False") + ">";
     });
 
-  m.def(
-    "apply",
-    [](cyra::Policy policy, int priority, std::vector<std::uint32_t> cpus) {
-      cyra::Options opts{policy, priority, std::move(cpus)};
-      return cyra::apply_checked(opts, cyra::Strictness::Soft).to_string();
-    },
-    nb::arg("policy") = cyra::Policy::Inherit, nb::arg("priority") = 0,
-    nb::arg("cpus") = std::vector<std::uint32_t>{},
-    "Put the CALLING thread on this policy, priority and cpu set, and confirm by reading back "
-    "what the kernel gave. A thread can only do this to itself, which is why an executor's "
-    "children apply their own.\n\n"
-    "Raises rather than settling for less: OSError when the kernel refuses, RuntimeError when a "
-    "check finds the request cannot take effect on this host or when the read-back disagrees "
-    "with what was asked. Asking for nothing does nothing. Returns a human-readable report of "
-    "what the host was found to be. Diagnostic text, not a format to parse; empty when nothing "
-    "was asked.");
+  nb::class_<cyra::Finding>(m, "Finding")
+    .def_ro("id", &cyra::Finding::id)
+    .def_ro("verdict", &cyra::Finding::verdict)
+    .def_ro("detail", &cyra::Finding::detail);
 
-  m.def(
-    "current", &cyra::current, "What the calling thread runs at right now, read from the kernel.");
+  nb::class_<cyra::Report>(m, "Report")
+    .def_ro("findings", &cyra::Report::findings)
+    .def("ok", &cyra::Report::ok)
+    .def(
+      "find", [](const cyra::Report & r, const std::string & id) { return r.find(id.c_str()); },
+      "id"_a, nb::rv_policy::reference_internal)
+    .def("to_string", &cyra::Report::to_string);
 
-  m.def(
-    "this_tid", &cyra::this_tid,
-    "The calling thread's kernel thread id, which is what `top -H` and /proc name it by. "
-    "threading.get_ident() is not this number.");
+  nb::class_<cyra::Match>(m, "Match")
+    .def_ro("irq", &cyra::Match::irq)
+    .def_ro("process", &cyra::Match::process)
+    .def_ro("thread", &cyra::Match::thread)
+    .def("empty", &cyra::Match::empty);
 
-  // The chain declaration file, read by the parser C++ uses. Only what applying a stage needs.
-  nb::class_<cyra::Stage>(m, "Stage", "One thread of a chain, as the declaration file states it.")
-    .def_ro("node", &cyra::Stage::node, "Fully-qualified node name.")
-    .def_ro("group", &cyra::Stage::group, "Group label; empty means the node's default group.")
-    .def_ro("chain", &cyra::Stage::chain, "The chain that declared this stage.")
-    .def_ro("external", &cyra::Stage::external, "cyra does not set this thread.")
+  nb::class_<cyra::Stage>(m, "Stage")
+    .def_ro("node", &cyra::Stage::node)
+    .def_ro("group", &cyra::Stage::group)
+    .def_ro("name", &cyra::Stage::name)
+    .def_ro("kind", &cyra::Stage::kind)
+    .def_ro("external", &cyra::Stage::external)
     .def_ro("expect_priority", &cyra::Stage::expect_priority)
-    .def_prop_ro("policy", [](const cyra::Stage & st) { return st.opts.policy; })
-    .def_prop_ro("priority", [](const cyra::Stage & st) { return st.opts.priority; })
-    .def_prop_ro("cpus", [](const cyra::Stage & st) { return st.opts.cpus; })
-    .def_ro("control_priority", &cyra::Stage::control_priority);
+    .def_ro("match", &cyra::Stage::match)
+    .def_ro("children_cpus", &cyra::Stage::children_cpus)
+    .def_ro("opts", &cyra::Stage::opts)
+    .def_ro("strict", &cyra::Stage::strict)
+    .def_ro("chain", &cyra::Stage::chain);
 
-  nb::class_<cyra::Spec>(m, "Spec", "A parsed chain declaration file (docs/en/api.en.md).")
+  nb::class_<cyra::Spec>(m, "Spec")
     .def_static(
       "load",
       [](std::optional<std::string> path) {
         return path ? cyra::Spec::load(*path) : cyra::Spec::load();
       },
-      nb::arg("path") = nb::none(),
-      "Parse `path`, or the file CYRA_SPEC names when it is None. Unset gives an empty spec. "
-      "RuntimeError on any rule the file breaks.")
+      "path"_a = nb::none())
     .def("empty", &cyra::Spec::empty)
-    .def(
-      "stage", &cyra::Spec::stage, nb::arg("node"), nb::arg("group") = "",
-      nb::rv_policy::reference_internal,
-      "The stage for this fully-qualified node name and group label. RuntimeError when the file "
-      "does not name it.");
+    .def("stages", &cyra::Spec::stages, nb::rv_policy::reference_internal)
+    .def("stage", &cyra::Spec::stage, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
+    .def("find", &cyra::Spec::find, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
+    .def("external", &cyra::Spec::external, nb::rv_policy::reference_internal);
 
+  m.def("preflight", &cyra::preflight, "opts"_a, "control_priority"_a = 0);
   m.def(
-    "apply", [](const cyra::Stage & stage) { return cyra::apply_checked(stage).to_string(); },
-    nb::arg("stage"),
-    "Put the CALLING thread on a declared stage, with the chain's target and control-loop "
-    "priority. Same read-back and refusals as the other form; ValueError for an external stage.");
+    "apply_checked",
+    nb::overload_cast<const cyra::Options &, cyra::Strictness, int>(&cyra::apply_checked), "opts"_a,
+    "strict"_a = cyra::Strictness::Soft, "control_priority"_a = 0);
+  m.def("apply_checked", nb::overload_cast<const cyra::Stage &>(&cyra::apply_checked), "stage"_a);
+  m.def("bind", &cyra::bind, "target"_a, "group"_a = "");
+  m.def("current", &cyra::current);
+  m.def("this_tid", &cyra::this_tid, "The kernel tid; threading.get_ident() is not this number.");
+  m.def("observe", &cyra::observe, "tid"_a);
+  m.def("verify", &cyra::verify, "stage"_a, "tid"_a);
+  m.def("verify_process", nb::overload_cast<const cyra::Spec &>(&cyra::verify_process), "spec"_a);
+  m.def(
+    "verify_process", nb::overload_cast<const cyra::Spec &, int>(&cyra::verify_process), "spec"_a,
+    "pid"_a);
+
+  nb::class_<cyra::Binding>(m, "Binding")
+    .def_ro("node", &cyra::Binding::node)
+    .def_ro("group", &cyra::Binding::group)
+    .def_ro("name", &cyra::Binding::name)
+    .def_ro("pid", &cyra::Binding::pid)
+    .def_ro("tid", &cyra::Binding::tid);
+  m.def("bindings", &cyra::bindings);
 }

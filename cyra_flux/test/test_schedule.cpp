@@ -20,9 +20,9 @@
 
 using namespace std::chrono_literals;
 
-// cyra::flux::schedule(): the child thread serving the group applies the declared scheduling to
-// itself before its first callback. Affinity needs no privilege, so it proves end to end that the
-// options reach the child thread: the callback reads its own affinity back from the kernel.
+// cyra::flux::apply_checked(): the child thread serving the group applies the declared scheduling
+// to itself before its first callback. Affinity needs no privilege, so it proves end to end that
+// the options reach the child thread: the callback reads its own affinity back from the kernel.
 TEST(Schedule, ScheduleReachesTheChildThread)
 {
   rclcpp::init(0, nullptr);
@@ -47,7 +47,7 @@ TEST(Schedule, ScheduleReachesTheChildThread)
   ex.add_ros_node(sub_node);
   cyra::Options sched;
   sched.cpus = {0};
-  cyra::flux::schedule(ex, g, sched);
+  cyra::flux::apply_checked(ex, *sub_node, g, sched);
 
   std::atomic<bool> run{true};
   std::thread spinner([&] { ex.spin(run, 20'000'000); });
@@ -101,7 +101,7 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
 
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(sub_node);
-  cyra::flux::schedule(ex, g, sched);
+  cyra::flux::apply_checked(ex, *sub_node, g, sched);
 
   std::atomic<bool> run{true};
   if (perm->verdict != cyra::Verdict::Ok) {
@@ -129,33 +129,43 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
   EXPECT_EQ(policy_in_callback, SCHED_FIFO) << "preflight said Ok but the child is not FIFO";
 }
 
-// The schedule surface rejects everything it cannot honor: a null group, options validate()
-// refuses, a second schedule for the same group, a schedule for a group no child will serve,
-// and any schedule() once spinning.
+// The surface rejects everything it cannot honor: a group of another node, options validate()
+// refuses, a second declaration for the same group, a declaration for a group no child will
+// serve, and any declaration once spinning. A null group is the node's default one.
 TEST(Schedule, ScheduleRejects)
 {
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_sched_reject");
+  auto other = std::make_shared<rclcpp::Node>("cie_sched_other");
 
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(node);
 
-  EXPECT_THROW(cyra::flux::schedule(ex, nullptr, cyra::Options{}), std::invalid_argument);
+  auto foreign = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  EXPECT_THROW(
+    cyra::flux::apply_checked(ex, *node, foreign, cyra::Options{}), std::invalid_argument);
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   cyra::Options bad;
   bad.policy = cyra::Policy::Fifo;  // priority 0 with an RT policy: reinterpretable
-  EXPECT_THROW(cyra::flux::schedule(ex, g, bad), std::invalid_argument);
+  EXPECT_THROW(cyra::flux::apply_checked(ex, *node, g, bad), std::invalid_argument);
 
-  cyra::flux::schedule(ex, g, cyra::Options{});
+  cyra::flux::apply_checked(ex, *node, g, cyra::Options{});
   EXPECT_THROW(
-    cyra::flux::schedule(ex, g, cyra::Options{}), std::invalid_argument);  // one schedule per group
+    cyra::flux::apply_checked(ex, *node, g, cyra::Options{}),
+    std::invalid_argument);  // one declaration per group
+  EXPECT_NO_THROW(cyra::flux::apply_checked(ex, *node, nullptr, cyra::Options{}));
+  EXPECT_THROW(
+    cyra::flux::apply_checked(
+      ex, *node, node->get_node_base_interface()->get_default_callback_group(), cyra::Options{}),
+    std::invalid_argument)
+    << "nullptr and the default group are the same group";
 
-  // A group of a node never handed over: no child will serve it, so the schedule would
+  // A group of a node never handed over: no child will serve it, so the declaration would
   // silently never apply. spin() refuses to start.
   auto stray_node = std::make_shared<rclcpp::Node>("cie_sched_stray");
   auto stray = stray_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  cyra::flux::schedule(ex, stray, cyra::Options{});
+  cyra::flux::apply_checked(ex, *stray_node, stray, cyra::Options{});
   std::atomic<bool> run{true};
   EXPECT_THROW(ex.spin(run, 20'000'000), std::invalid_argument);
 
@@ -163,7 +173,7 @@ TEST(Schedule, ScheduleRejects)
   ex2.add_ros_node(node);
   std::thread spinner([&] { ex2.spin(run, 20'000'000); });
   std::this_thread::sleep_for(100ms);
-  EXPECT_THROW(cyra::flux::schedule(ex2, g, cyra::Options{}), std::logic_error);
+  EXPECT_THROW(cyra::flux::apply_checked(ex2, *node, g, cyra::Options{}), std::logic_error);
   run.store(false);
   ex2.stop();
   spinner.join();
@@ -192,7 +202,7 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(node);
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  cyra::flux::schedule(ex, g, opts, cyra::Strictness::Hard);
+  cyra::flux::apply_checked(ex, *node, g, opts, cyra::Strictness::Hard);
 
   std::atomic<bool> run{true};
   EXPECT_THROW(ex.spin(run, 20'000'000), std::runtime_error);
@@ -203,7 +213,7 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
 // ---- the declaration file's name for a thread, checked against the group handed over ----
 //
 // A stage names its thread (node, label); an rclcpp callback group has no name at all. The only
-// thing linking the two is the pairing at the schedule() call.
+// thing linking the two is the pairing at the apply_checked() call.
 
 namespace
 {
@@ -267,7 +277,7 @@ TEST(ScheduleStage, RejectsAStageWhoseNodeIsNotTheNodeHandedOver)
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::ros::PartitionedExecutor ex;
   const std::string why =
-    refusal([&] { cyra::flux::schedule(ex, *node, g, *spec.find("/cie_label_other")); });
+    refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("but was handed node"), std::string::npos) << why;
@@ -284,10 +294,10 @@ TEST(ScheduleStage, RejectsAGroupOfAnotherNode)
   auto g = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::ros::PartitionedExecutor ex;
   const std::string why =
-    refusal([&] { cyra::flux::schedule(ex, *node, g, *spec.find("/cie_label", "infer")); });
+    refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer")); });
   rclcpp::shutdown();
 
-  EXPECT_NE(why.find("the group belongs to another node"), std::string::npos) << why;
+  EXPECT_NE(why.find("does not belong to node"), std::string::npos) << why;
 }
 
 TEST(ScheduleStage, RejectsALabelledStageOnTheDefaultGroup)
@@ -299,7 +309,7 @@ TEST(ScheduleStage, RejectsALabelledStageOnTheDefaultGroup)
 
   flux::ros::PartitionedExecutor ex;
   const std::string why = refusal([&] {
-    cyra::flux::schedule(
+    cyra::flux::apply_checked(
       ex, *node, node->get_node_base_interface()->get_default_callback_group(),
       *spec.find("/cie_label", "infer"));
   });
@@ -318,7 +328,7 @@ TEST(ScheduleStage, RejectsAnUnlabelledStageOnANamedGroup)
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::ros::PartitionedExecutor ex;
   const std::string why =
-    refusal([&] { cyra::flux::schedule(ex, *node, g, *spec.find("/cie_label_other")); });
+    refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("names no group"), std::string::npos) << why;
@@ -334,7 +344,7 @@ TEST(ScheduleStage, AcceptsAStageOnTheGroupItNames)
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(node);
-  cyra::flux::schedule(ex, *node, g, *spec.find("/cie_label", "infer"));
+  cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer"));
 
   std::atomic<bool> run{true};
   std::thread spinner([&] { ex.spin(run, 20'000'000); });
@@ -358,8 +368,8 @@ TEST(ScheduleStage, RejectsOneStageOnTwoGroups)
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(node);
   const auto & stage = *spec.find("/cie_label", "infer");
-  cyra::flux::schedule(ex, *node, ga, stage);
-  cyra::flux::schedule(ex, *node, gb, stage);
+  cyra::flux::apply_checked(ex, *node, ga, stage);
+  cyra::flux::apply_checked(ex, *node, gb, stage);
 
   std::atomic<bool> run{true};
   const std::string why = refusal([&] { ex.spin(run, 20'000'000); });

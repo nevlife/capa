@@ -31,7 +31,24 @@ else()
 endif()
 include(GNUInstallDirs)
 
+# thread / address / undefined. TSan is the one that matters here: the stage claims are a mutex
+# and a thread_local that every applying thread touches.
+set(CYRA_SANITIZER "" CACHE STRING "Build with -fsanitize=<value> (thread, address, undefined)")
+if(CYRA_SANITIZER)
+  add_compile_options(-fsanitize=${CYRA_SANITIZER} -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=${CYRA_SANITIZER})
+endif()
+
+# CYRA_FUZZER=ON instruments the library too, so the fuzzer is guided by the parser's edges and
+# not only the harness's. Clang only: cmake -DCYRA_FUZZER=ON -DCMAKE_CXX_COMPILER=clang++
+set(CYRA_FUZZER OFF CACHE BOOL "Build the fuzz harness with libFuzzer (clang only)")
+if(CYRA_FUZZER)
+  add_compile_options(-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+
 add_library(cyra_core
+  src/record.cpp
   src/rt.cpp
   src/spec.cpp)
 target_link_libraries(cyra_core PRIVATE ${CYRA_YAML_CPP_TARGET})
@@ -48,8 +65,22 @@ target_compile_options(cyra_core PRIVATE -Wall -Wextra -Wpedantic)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 set(cyra_core_test_srcs
+  test/test_record.cpp
   test/test_rt.cpp
   test/test_spec.cpp)
+# Tests write their records here rather than into the host's /dev/shm.
+set(CYRA_TEST_RUN_DIR ${CMAKE_CURRENT_BINARY_DIR}/run)
+file(MAKE_DIRECTORY ${CYRA_TEST_RUN_DIR})
+
+# Without libFuzzer the harness links a replay main() that runs a corpus bent from valid files,
+# so ctest keeps it compiled and exercised between fuzzing sessions.
+if(CYRA_FUZZER)
+  add_executable(fuzz_spec test/fuzz/fuzz_spec.cpp)
+  target_link_options(fuzz_spec PRIVATE -fsanitize=fuzzer)
+else()
+  add_executable(fuzz_spec test/fuzz/fuzz_spec.cpp test/fuzz/fuzz_spec_replay_main.cpp)
+endif()
+target_link_libraries(fuzz_spec PRIVATE cyra_core)
 
 if(ament_cmake_FOUND)
   install(TARGETS cyra_core
@@ -66,9 +97,13 @@ if(ament_cmake_FOUND)
 
   if(BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
-    ament_add_gtest(test_cyra_core ${cyra_core_test_srcs})
+    ament_add_gtest(test_cyra_core ${cyra_core_test_srcs} ENV CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR})
     if(TARGET test_cyra_core)
       target_link_libraries(test_cyra_core cyra_core Threads::Threads)
+      target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
+    endif()
+    if(NOT CYRA_FUZZER)
+      add_test(NAME fuzz_spec_corpus COMMAND fuzz_spec)
     endif()
   endif()
 
@@ -102,6 +137,11 @@ else()
     find_package(GTest REQUIRED)
     add_executable(test_cyra_core ${cyra_core_test_srcs})
     target_link_libraries(test_cyra_core PRIVATE cyra_core GTest::gtest GTest::gtest_main Threads::Threads)
+    target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
     add_test(NAME test_cyra_core COMMAND test_cyra_core)
+    set_tests_properties(test_cyra_core PROPERTIES ENVIRONMENT CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR})
+    if(NOT CYRA_FUZZER)
+      add_test(NAME fuzz_spec_corpus COMMAND fuzz_spec)
+    endif()
   endif()
 endif()

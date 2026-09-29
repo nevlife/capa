@@ -27,9 +27,12 @@ struct RestoreThread
 
   ~RestoreThread()
   {
+    // SCHED_RESET_ON_FORK, once set, clears only with CAP_SYS_NICE. Keep it rather than fail the
+    // whole restore: on a SCHED_OTHER thread it changes nothing the next test looks at.
     sched_param param{};
     param.sched_priority = saved.priority;
-    ::sched_setscheduler(0, saved.policy, &param);
+    const int keep = cyra::current().reset_on_fork ? SCHED_RESET_ON_FORK : 0;
+    ::sched_setscheduler(0, saved.policy | keep, &param);
     cpu_set_t set;
     CPU_ZERO(&set);
     for (auto c : saved.cpus) CPU_SET(static_cast<int>(c), &set);
@@ -64,7 +67,7 @@ TEST(Rt, ValidateRejectsReinterpretableCombos)
 TEST(Rt, ApplyOfDefaultOptionsChangesNothing)
 {
   const auto before = cyra::current();
-  cyra::apply(cyra::Options{});
+  cyra::detail::apply(cyra::Options{});
   const auto after = cyra::current();
   EXPECT_EQ(before.policy, after.policy);
   EXPECT_EQ(before.priority, after.priority);
@@ -78,7 +81,7 @@ TEST(Rt, ApplyPinsTheCallingThread)
   ASSERT_FALSE(before.cpus.empty());
   cyra::Options opts;
   opts.cpus = {before.cpus.front()};
-  cyra::apply(opts);
+  cyra::detail::apply(opts);
   EXPECT_EQ(cyra::current().cpus, opts.cpus);
 }
 
@@ -92,12 +95,12 @@ TEST(Rt, ApplyMatchesPreflightPermissionVerdict)
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict == cyra::Verdict::Ok) {
-    cyra::apply(opts);
+    cyra::detail::apply(opts);
     const auto state = cyra::current();
     EXPECT_EQ(state.policy, SCHED_FIFO);
     EXPECT_EQ(state.priority, 10);
   } else {
-    EXPECT_THROW(cyra::apply(opts), std::system_error);
+    EXPECT_THROW(cyra::detail::apply(opts), std::system_error);
     EXPECT_NE(cyra::current().policy, SCHED_FIFO);
   }
 }
@@ -115,11 +118,11 @@ TEST(Rt, RefusedApplyRollsBackAffinity)
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict == cyra::Verdict::Ok) {
-    cyra::apply(opts);
+    cyra::detail::apply(opts);
     EXPECT_EQ(cyra::current().policy, SCHED_FIFO);
     EXPECT_EQ(cyra::current().cpus, opts.cpus);
   } else {
-    EXPECT_THROW(cyra::apply(opts), std::system_error);
+    EXPECT_THROW(cyra::detail::apply(opts), std::system_error);
     EXPECT_EQ(cyra::current().cpus, before.cpus);
   }
 }
@@ -297,7 +300,7 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
   std::atomic<bool> stop{false};
   cyra::ThreadState self_view;
   std::thread child([&] {
-    if (perm->verdict == cyra::Verdict::Ok) cyra::apply(opts);
+    if (perm->verdict == cyra::Verdict::Ok) cyra::detail::apply(opts);
     self_view = cyra::current();
     child_tid.store(cyra::this_tid());
     settled.store(true);
@@ -365,5 +368,55 @@ TEST(Rt, PrivilegedPathIsExercisedWhereDeclared)
   if (!privileged) {
     std::cout << "[  NOTE    ] RT tests took the refusal branch only: " << perm->detail << "\n"
               << "[  NOTE    ] set CYRA_REQUIRE_PRIVILEGE=1 where SCHED_FIFO must work\n";
+  }
+}
+
+TEST(Rt, ValidateRejectsInheritedChildrenWithoutAnRtPolicy)
+{
+  cyra::Options opts;
+  opts.children = cyra::Children::Inherit;
+  EXPECT_THROW(opts.validate(), std::invalid_argument) << "nothing RT to pass on";
+  opts.policy = cyra::Policy::Fifo;
+  opts.priority = 10;
+  EXPECT_NO_THROW(opts.validate());
+}
+
+// Linux hands a child its parent's policy by default, pthreads included. Reset must reach a
+// std::thread child, not only fork(); Inherit must leave the default alone. Affinity is inherited
+// either way, which the kernel offers no flag against.
+TEST(Rt, ChildrenFollowTheDeclaredPolicy)
+{
+  cyra::Options opts;
+  opts.policy = cyra::Policy::Fifo;
+  opts.priority = 10;
+  const auto rep = cyra::preflight(opts);
+  const auto * perm = rep.find("policy-permission");
+  ASSERT_NE(perm, nullptr);
+  if (perm->verdict != cyra::Verdict::Ok) {
+    GTEST_SKIP() << "cyra-cap:rtprio host does not permit SCHED_FIFO";
+  }
+
+  for (auto children : {cyra::Children::Reset, cyra::Children::Inherit}) {
+    cyra::ThreadState parent;
+    cyra::ThreadState child;
+    std::thread outer([&] {
+      opts.children = children;
+      cyra::apply_checked(opts, cyra::Strictness::Soft);
+      parent = cyra::current();
+      std::thread inner([&] { child = cyra::current(); });
+      inner.join();
+    });
+    outer.join();
+
+    EXPECT_EQ(parent.policy, SCHED_FIFO);
+    EXPECT_EQ(parent.reset_on_fork, children == cyra::Children::Reset);
+    if (children == cyra::Children::Reset) {
+      EXPECT_EQ(child.policy, SCHED_OTHER) << "a reset stage leaked FIFO to its child";
+      EXPECT_EQ(child.priority, 0);
+    } else {
+      EXPECT_EQ(child.policy, SCHED_FIFO) << "an inherit stage's child did not inherit";
+      EXPECT_EQ(child.priority, 10);
+    }
+    EXPECT_FALSE(child.reset_on_fork) << "the flag is not itself inherited";
   }
 }

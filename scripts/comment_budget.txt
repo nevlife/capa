@@ -1,0 +1,14 @@
+# Comment budget. A ratchet, not a target: these numbers may go down and never up.
+#
+# Comments record only what the code cannot show. Nothing else enforces that, so the number is
+# pinned here rather than left to whoever reviews the next diff.
+#
+# density: comment lines / code lines over every .cpp/.hpp/.rs under the packages that
+# scripts/check_comment_density.py lists, in src and include.
+# Lowering it means deleting a comment or writing code; both are the point.
+#
+# block: the longest run of consecutive // lines allowed in a file. A block past this is an
+# essay, and an essay belongs in docs/.
+
+density 0.098
+block 10

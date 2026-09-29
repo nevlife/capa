@@ -1,0 +1,19 @@
+# Copy to /etc/systemd/system/, set CYRA_SPEC and ExecStart to the installed cyrad, then
+# `systemctl enable --now cyrad`. `systemctl reload cyrad` rereads the file.
+[Unit]
+Description=cyra thread scheduling daemon
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=CYRA_SPEC=/etc/cyra/chain.yaml
+ExecStart=/opt/cyra/bin/cyrad
+ExecReload=/bin/kill -HUP $MAINPID
+# Setting another process's scheduling needs CAP_SYS_NICE; nothing else is granted.
+User=cyra
+AmbientCapabilities=CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_NICE
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

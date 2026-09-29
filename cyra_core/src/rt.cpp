@@ -441,7 +441,7 @@ void check_memory_lock(Report & rep)
     rep.findings.push_back(
       {"memory-lock", Verdict::Warn,
        "no locked memory: any page fault is an unbounded stall; lock and pre-fault the "
-       "working set (MemoryPolicy::lock on the channel)"});
+       "working set (mlockall(MCL_CURRENT | MCL_FUTURE))"});
   }
 }
 
@@ -461,6 +461,11 @@ void Options::validate() const
       "priority " + std::to_string(priority) + " with policy " + policy_name(policy) +
       " would be ignored; set policy=Fifo or RoundRobin, or drop the priority");
   }
+  if (!rt && children == Children::Inherit) {
+    fail(
+      std::string("children=inherit with policy ") + policy_name(policy) +
+      " would be ignored; only an RT policy passes anything on to children");
+  }
   for (auto c : cpus) {
     if (c >= kMaxCpus) {
       fail(
@@ -469,7 +474,7 @@ void Options::validate() const
   }
 }
 
-void apply(const Options & opts)
+void detail::apply_to(int tid, const Options & opts)
 {
   opts.validate();
   const bool want_policy = opts.policy != Policy::Inherit;
@@ -481,38 +486,57 @@ void apply(const Options & opts)
 #else
   cpu_set_t old_set;
   if (want_cpus) {
-    if (::sched_getaffinity(0, sizeof old_set, &old_set) != 0) {
+    if (::sched_getaffinity(tid, sizeof old_set, &old_set) != 0) {
       throw std::system_error(errno, std::generic_category(), "cyra: sched_getaffinity");
     }
     cpu_set_t set;
     CPU_ZERO(&set);
     for (auto c : opts.cpus) CPU_SET(static_cast<int>(c), &set);
-    if (::sched_setaffinity(0, sizeof set, &set) != 0) {
+    if (::sched_setaffinity(tid, sizeof set, &set) != 0) {
+      const int e = errno;
       throw std::system_error(
-        errno, std::generic_category(),
-        "cyra: sched_setaffinity refused the requested cpus; cyra::preflight() explains this host");
+        e, std::generic_category(),
+        std::string("cyra: sched_setaffinity refused the requested cpus") +
+          (tid != 0 && e == EPERM ? "; setting a thread of another user needs CAP_SYS_NICE"
+                                  : "; cyra::preflight() explains this host"));
     }
   }
   if (want_policy) {
     sched_param param{};
     param.sched_priority = opts.priority;
-    if (::sched_setscheduler(0, native_policy(opts.policy), &param) != 0) {
+    const int reset =
+      is_rt_policy(opts.policy) && opts.children == Children::Reset ? SCHED_RESET_ON_FORK : 0;
+    const bool flag_set = (::sched_getscheduler(tid) & SCHED_RESET_ON_FORK) != 0;
+    if (::sched_setscheduler(tid, native_policy(opts.policy) | reset, &param) != 0) {
       const int e = errno;
-      if (want_cpus) ::sched_setaffinity(0, sizeof old_set, &old_set);
+      if (want_cpus) ::sched_setaffinity(tid, sizeof old_set, &old_set);
+      const std::string why =
+        e == EPERM && flag_set && reset == 0
+          ? "; this thread was set with children=reset before, and only CAP_SYS_NICE can clear "
+            "that"
+        : tid != 0 && e == EPERM ? "; setting a thread of another user needs CAP_SYS_NICE"
+                                 : "; cyra::preflight() explains this host";
       throw std::system_error(
         e, std::generic_category(),
         "cyra: sched_setscheduler(" + std::string(policy_name(opts.policy)) + ", " +
-          std::to_string(opts.priority) + ") refused; cyra::preflight() explains this host");
+          std::to_string(opts.priority) + ") refused" + why);
     }
   }
 #endif
+}
+
+void detail::apply(const Options & opts)
+{
+  apply_to(0, opts);
 }
 
 ThreadState current()
 {
   ThreadState st;
 #if defined(__linux__)
-  st.policy = ::sched_getscheduler(0);
+  const int raw = ::sched_getscheduler(0);
+  st.policy = raw & ~SCHED_RESET_ON_FORK;
+  st.reset_on_fork = (raw & SCHED_RESET_ON_FORK) != 0;
   sched_param param{};
   if (::sched_getparam(0, &param) == 0) st.priority = param.sched_priority;
   cpu_set_t set;
@@ -547,8 +571,10 @@ ThreadState observe(int tid)
   const std::string who = "cyra: observe(" + std::to_string(tid) + ")";
   ThreadState st;
   errno = 0;
-  st.policy = ::sched_getscheduler(tid);
-  if (st.policy < 0) throw std::system_error(errno, std::generic_category(), who);
+  const int raw = ::sched_getscheduler(tid);
+  if (raw < 0) throw std::system_error(errno, std::generic_category(), who);
+  st.policy = raw & ~SCHED_RESET_ON_FORK;
+  st.reset_on_fork = (raw & SCHED_RESET_ON_FORK) != 0;
   sched_param param{};
   if (::sched_getparam(tid, &param) != 0) {
     throw std::system_error(errno, std::generic_category(), who + " sched_getparam");
@@ -640,7 +666,8 @@ bool has_warn(const Report & rep)
 }
 }  // namespace
 
-Report apply_checked(const Options & opts, Strictness strict, int control_priority)
+Report detail::apply_checked_to(
+  int tid, const Options & opts, Strictness strict, int control_priority)
 {
   opts.validate();
   // Same no-op contract as apply(): options that ask for nothing get nothing, including no
@@ -655,7 +682,7 @@ Report apply_checked(const Options & opts, Strictness strict, int control_priori
       (strict == Strictness::Hard ? "hard" : "soft") + "-RT request; nothing was applied\n" +
       rep.to_string());
   }
-  apply(opts);
+  detail::apply_to(tid, opts);
 
   // Confirm by reading back rather than by trusting the syscall's return: nothing stops another
   // thread from re-scheduling this one between the two calls. Trusting the return is the same
@@ -663,9 +690,9 @@ Report apply_checked(const Options & opts, Strictness strict, int control_priori
   //
   // The affinity claim is observed within requested, not equal to it. A cpuset narrows the mask
   // to the cpus it allows, and a thread on fewer of its requested cpus has left none of them;
-  // a cpu outside the request is the failure. ros::verify reads the same claim afterwards.
+  // a cpu outside the request is the failure. verify() reads the same claim afterwards.
 #if defined(__linux__)
-  const ThreadState got = current();
+  const ThreadState got = tid == 0 ? current() : observe(tid);
   if (opts.policy != Policy::Inherit) {
     if (got.policy != native_policy(opts.policy) || got.priority != opts.priority) {
       throw std::runtime_error(
@@ -673,6 +700,13 @@ Report apply_checked(const Options & opts, Strictness strict, int control_priori
         "/priority " + std::to_string(got.priority) + " after asking for " +
         policy_name(opts.policy) + "/" + std::to_string(opts.priority) +
         "; the thread is not running as declared");
+    }
+    const bool want_reset = is_rt_policy(opts.policy) && opts.children == Children::Reset;
+    if (got.reset_on_fork != want_reset) {
+      throw std::runtime_error(
+        std::string("cyra: apply_checked read back SCHED_RESET_ON_FORK ") +
+        (got.reset_on_fork ? "set" : "clear") +
+        " after asking for children=" + (opts.children == Children::Reset ? "reset" : "inherit"));
     }
   }
   if (!opts.cpus.empty()) {
@@ -689,6 +723,11 @@ Report apply_checked(const Options & opts, Strictness strict, int control_priori
   }
 #endif
   return rep;
+}
+
+Report apply_checked(const Options & opts, Strictness strict, int control_priority)
+{
+  return detail::apply_checked_to(0, opts, strict, control_priority);
 }
 
 }  // namespace cyra

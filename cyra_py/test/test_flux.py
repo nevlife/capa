@@ -69,7 +69,7 @@ def test_a_group_child_runs_where_it_was_declared(node):
 
     ex = flux.ros.PartitionedExecutor()
     ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
-    cyra.flux.set_thread_scheduling(ex, group, cpus=[target])
+    cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[target]))
 
     t = spin_in_thread(ex)
     try:
@@ -102,7 +102,7 @@ def _spec_file(tmp_path, cpu):
     return str(path)
 
 
-# A stage handed to schedule() reaches the child thread the way set_thread_scheduling's values do.
+# A stage reaches the child thread the way Options do.
 @needs_two_cpus
 def test_a_stage_reaches_the_group_child(node, tmp_path):
     target = spare_cpus[-1]
@@ -114,7 +114,7 @@ def test_a_stage_reaches_the_group_child(node, tmp_path):
 
     ex = flux.ros.PartitionedExecutor()
     ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
-    cyra.flux.schedule(ex, group, spec.stage(node.get_fully_qualified_name(), "infer"))
+    cyra.flux.apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), "infer"))
 
     t = spin_in_thread(ex)
     try:
@@ -139,7 +139,7 @@ def test_a_node_child_runs_where_it_was_declared(node):
 
     ex = flux.ros.PartitionedExecutor()
     ex.add_ros_node(node)
-    cyra.flux.set_thread_scheduling(ex, node, cpus=[target])
+    cyra.flux.apply_checked(ex, node, None, cyra.Options(cpus=[target]))
 
     t = spin_in_thread(ex)
     try:
@@ -172,13 +172,14 @@ def test_two_groups_get_the_cpus_each_declared(node):
         def cb(_v):
             with lock:
                 seen.setdefault(index, cyra.current().cpus)
+
         return cb
 
     ex = flux.ros.PartitionedExecutor()
     for index, (sub, group) in enumerate(zip(subs, groups)):
         ex.add(sub, group, record(index))
-    cyra.flux.set_thread_scheduling(ex, groups[0], cpus=[left])
-    cyra.flux.set_thread_scheduling(ex, groups[1], cpus=[right])
+    cyra.flux.apply_checked(ex, node, groups[0], cyra.Options(cpus=[left]))
+    cyra.flux.apply_checked(ex, node, groups[1], cyra.Options(cpus=[right]))
 
     t = spin_in_thread(ex)
     try:
@@ -198,18 +199,20 @@ def test_two_groups_get_the_cpus_each_declared(node):
 # silent downgrade the surface exists to prevent, so spin() refuses it.
 def test_a_declaration_for_an_unserved_unit_is_refused(node):
     ex = flux.ros.PartitionedExecutor()
-    cyra.flux.set_thread_scheduling(ex, MutuallyExclusiveCallbackGroup(), cpus=[spare_cpus[0]])
+    cyra.flux.apply_checked(
+        ex, node, MutuallyExclusiveCallbackGroup(), cyra.Options(cpus=[spare_cpus[0]])
+    )
     with pytest.raises(ValueError, match="does not serve"):
         ex.spin(20_000_000)
 
 
 # Which of two declarations wins must never be a question of call order.
-def test_a_second_declaration_for_one_unit_is_refused():
+def test_a_second_declaration_for_one_unit_is_refused(node):
     ex = flux.ros.PartitionedExecutor()
     group = MutuallyExclusiveCallbackGroup()
-    cyra.flux.set_thread_scheduling(ex, group, cpus=[spare_cpus[0]])
+    cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
     with pytest.raises(ValueError, match="already has an on_thread_start"):
-        cyra.flux.set_thread_scheduling(ex, group, cpus=[spare_cpus[0]])
+        cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
 
 
 def test_declaring_after_spin_started_is_refused(node):
@@ -225,7 +228,7 @@ def test_declaring_after_spin_started_is_refused(node):
         while not ex._spinning and time.monotonic() < deadline:
             time.sleep(0.01)
         with pytest.raises(RuntimeError, match="before spin"):
-            cyra.flux.set_thread_scheduling(ex, group, cpus=[spare_cpus[0]])
+            cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
     finally:
         ex.stop()
         t.join(timeout=10.0)
@@ -243,7 +246,7 @@ def test_a_refused_policy_ends_the_spin_rather_than_running_anyway(node):
 
     ex = flux.ros.PartitionedExecutor()
     ex.add(sub, group, lambda _v: ran.append(1))
-    cyra.flux.set_thread_scheduling(ex, group, policy=cyra.Policy.Fifo, priority=99)
+    cyra.flux.apply_checked(ex, node, group, cyra.Options(cyra.Policy.Fifo, 99))
 
     with pytest.raises((RuntimeError, OSError)):
         ex.spin(20_000_000)
@@ -260,7 +263,7 @@ def test_a_granted_policy_reaches_the_child(node):
 
     ex = flux.ros.PartitionedExecutor()
     ex.add(sub, group, lambda _v: seen.append(cyra.current()))
-    cyra.flux.set_thread_scheduling(ex, group, policy=cyra.Policy.Fifo, priority=5)
+    cyra.flux.apply_checked(ex, node, group, cyra.Options(cyra.Policy.Fifo, 5))
 
     t = spin_in_thread(ex)
     try:
@@ -274,3 +277,41 @@ def test_a_granted_policy_reaches_the_child(node):
     finally:
         ex.stop()
         t.join(timeout=10.0)
+
+
+# bind() by label from CYRA_SPEC; the stage is looked up at the call, so a typo raises there.
+@needs_two_cpus
+def test_bind_reaches_the_group_child(node, tmp_path, monkeypatch):
+    target = spare_cpus[-1]
+    monkeypatch.setenv("CYRA_SPEC", _spec_file(tmp_path, target))
+    pub = flux.Publisher("/pytest/rt/bind", slot_size=4096, slot_count=8, fingerprint=FP)
+    sub = flux.Subscription("/pytest/rt/bind", fingerprint=FP)
+    group = MutuallyExclusiveCallbackGroup()
+    seen = []
+
+    ex = flux.ros.PartitionedExecutor()
+    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    with pytest.raises(RuntimeError, match="no stage"):
+        cyra.flux.bind(ex, node, group, "infr")
+    cyra.flux.bind(ex, node, group, "infer")
+
+    t = spin_in_thread(ex)
+    try:
+        deadline = time.monotonic() + 5.0
+        while not seen and time.monotonic() < deadline:
+            pub.publish(np.full(8, 3, np.uint8))
+            time.sleep(0.01)
+        assert seen, "the callback never ran"
+        assert seen[0] == [target]
+    finally:
+        ex.stop()
+        t.join(timeout=10.0)
+
+
+def test_a_stage_must_name_the_node_and_its_unit(node, tmp_path):
+    spec = cyra.Spec.load(_spec_file(tmp_path, spare_cpus[0]))
+    ex = flux.ros.PartitionedExecutor()
+    with pytest.raises(ValueError, match="but was handed node"):
+        cyra.flux.apply_checked(ex, node, None, spec.stage("/control_node", "loop"))
+    with pytest.raises(ValueError, match="default unit"):
+        cyra.flux.apply_checked(ex, node, None, spec.stage("/flux_rt_test", "infer"))

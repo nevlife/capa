@@ -1,191 +1,258 @@
 # cyra user API
 
-cyra sets and checks the OS scheduling of the threads on a dataflow path: policy, priority, and CPUs. It has three packages.
+cyra sets and checks the OS scheduling of the threads on a dataflow path: policy, priority, CPUs, and what their children inherit. The schedule lives in one file; code only says which stage a thread is.
 
 | Package | Contents | Depends on |
 | --- | --- | --- |
-| `cyra_core` | C++17, no ROS. Thread scheduling, host preflight, read-back, the chain declaration file | yaml-cpp |
-| `cyra_py` | Python binding of `cyra_core` (`cyra`), and `cyra.flux` | `cyra_core` |
-| `cyra_flux` | C++ scheduling for the threads of a flux `PartitionedExecutor` | `cyra_core`, `flux_cpp` |
+| `cyra_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
+| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core`, `flux_cpp` |
+| `cyra_py` | Python: `cyra` (the `cyra_core` names) and `cyra.flux` (the `cyra_flux` names) | `cyra_core` |
 
-## 1. Thread scheduling (C++)
+C++ and Python have the same names, the same arguments in the same order, and the same defaults. The differences are only where a language forces one, and are listed in section 7.
 
-```cpp
-#include "cyra/rt.hpp"
+## 1. One line per thread
 
-cyra::Options o;
-o.policy = cyra::Policy::Fifo;   // Inherit / Other / Fifo / RoundRobin
-o.priority = 80;                 // 1..99 for Fifo/RoundRobin
-o.cpus = {3};                    // leave empty to keep affinity untouched
-
-cyra::Report rep = cyra::preflight(o, /*control_priority=*/90);  // judgment only, no change
-cyra::apply(o);                  // applies to the calling thread. throws if refused
-cyra::ThreadState st = cyra::current();                 // read back from the kernel
-cyra::ThreadState other = cyra::observe(cyra::this_tid());  // the same values for another thread
-
-rep = cyra::apply_checked(o, cyra::Strictness::Hard, /*control_priority=*/90);
-```
-
-- `apply` applies to the calling thread itself. It is all-or-nothing. If the kernel refuses, it reverts and throws `std::system_error`. There is no silent downgrade.
-- `preflight` changes nothing and reports why it would not work as a list of findings (`rep.ok()`, `rep.to_string()`).
-- `apply_checked` joins the two. It runs `preflight` first, and if the judgment blocks, it throws `std::runtime_error` before touching the thread. The kernel accepts the request even on a host that cannot meet deadlines, so with `apply` alone, "success" does not mean "runs in real time".
-- `Strictness` decides how `Warn` is read. `Soft` accepts it and returns it in the report. `Hard` refuses it. `Fail` is refused by both. The default is `Soft`.
-- An `Options` that requests nothing is a complete no-op even in `apply_checked`. There is nothing to judge.
-- `current` reads your own thread from the kernel and `observe(tid)` reads another thread. Applying works only on your own thread, but reading works even across processes. `tid` comes from `this_tid()`. `std::thread::id` is not a name the kernel knows. A thread that cannot be read is a `std::system_error`.
-
-To look at the items directly instead of the one-line summary, iterate `rep.findings` or pick one with `rep.find(id)`.
-
-```cpp
-for (const cyra::Finding & f : rep.findings) {
-  if (f.verdict == cyra::Verdict::Fail) {
-    log(f.id, f.detail);
-  }
-}
-const cyra::Finding * one = rep.find("cpu-online");   // nullptr if not checked
-```
-
-`Finding` has three parts: `id` (a stable slug), `verdict`, and `detail` (why that verdict). `Verdict` is `Ok`, `Warn`, `Fail`, or `Unknown`, and `ok()` means "no `Fail`". `Unknown` means the kernel did not expose the source, not a pass.
-
-| finding id | Source | Meaning of Fail/Warn |
-| --- | --- | --- |
-| `policy-permission` | `CapEff`(CAP_SYS_NICE) + `RLIMIT_RTPRIO` | Fail: no permission. `apply` throws with EPERM |
-| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us` | Warn: the throttle preempts a busy RT thread regardless of priority |
-| `priority-order` | opts.priority vs `control_priority` | Fail: transport is at or above control. Transport must never preempt control |
-| `cpu-online` | `/sys/devices/system/cpu/online` | Fail: nonexistent core. `apply` throws with EINVAL |
-| `cpu-isolation` | `/sys/devices/system/cpu/isolated`·`nohz_full` | Warn: pinning only removes migration. A core without isolation is shared with others |
-| `rcu-offload` | `rcu_nocbs` in `/proc/cmdline` + `/sys/devices/system/cpu/nohz_full` | Warn: deferred kernel frees run on the RT core. Neither timing nor duration is bounded |
-| `irq-affinity` | `/proc/irq/*/effective_affinity_list` | Warn: handlers preempt every task on that core regardless of RT priority |
-| `cpu-governor` | `cpufreq/scaling_governor` | Warn: the DVFS ramp lengthens wakeup latency. RT cores use performance |
-| `kernel-preemption` | `/sys/kernel/realtime`·`/proc/version` | Warn: not PREEMPT_RT. No latency bound for in-kernel sections |
-| `memory-lock` | `VmLck` in `/proc/self/status` | Warn: no locked memory. A page fault is an unbounded delay |
-
-## 2. Chain declaration file (C++)
-
-Write the scheduling of one chain in one file, and each node finds and applies its own part when it starts. It holds even when nodes are started and killed individually by launch. Nothing pushes, and each reads on its own.
+The file names every stage of a chain and how it runs. `CYRA_SPEC` names the file.
 
 ```yaml
 chains:
   perception_to_control:
-    target: hard                # blocks Warn. soft only records it
+    target: hard
     stages:
+      - {node: /camera_node, group: grab, policy: fifo, priority: 60, cpus: [2]}
+      - {node: /perception_node, group: infer, policy: fifo, priority: 70, cpus: [3]}
+      - {node: /control_node, group: loop, policy: fifo, priority: 80, cpus: [4]}
+```
+
+A thread then says which stage it is. Which call depends on who created the thread.
+
+| Thread | C++ | Python |
+| --- | --- | --- |
+| One you start | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
+| One that already runs (main, a thread you own) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
+| A flux `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+
+- `bind(target, group="")` puts the calling thread on the stage, checks the host, and reads the result back from the kernel. `target` is a fully-qualified node name (`get_fully_qualified_name()`) with the group label, or a `name` stage's name with no group.
+- `spawn(target, group, fn)` starts a thread, binds it, and only then runs `fn`. It returns once the thread is set. If the bind is refused, `fn` never runs and the refusal is thrown to the caller. Prefer it over a thread that calls `bind` itself: that thread runs unscheduled until it reaches the `bind` line.
+- `cyra::flux::bind(ex, node, group, label="")` registers the bind on the executor. The child serving `group` binds itself before its first callback, and a refusal is the `spin()` error. The stage is looked up at the call, so a typo throws there.
+- With `CYRA_SPEC` unset, all three do nothing (`bind` returns an empty report, `spawn` just runs `fn`, `flux::bind` registers nothing).
+- A label the file does not name throws. Applying nothing would hide a typo.
+
+## 2. The chain file
+
+```yaml
+chains:
+  perception_to_control:
+    target: hard                  # hard: preflight Warns refuse the apply. soft: they are reported
+    criticality: 2                # higher comes first on a shared cpu. default 0
+    stages:
+      - name: camera_usb_irq      # not a ROS thread: named by `name`
+        kind: release             # hands work on; runs above the workers it feeds
+        external: true            # cyra does not set it; raised from the default 50 with chrt
+        expect_priority: 85       # an external stage may land on any cpu, so above every worker
       - node: /camera_node
-        group: dds_listener
-        external: true          # cyra does not apply it. someone else's thread, such as an rmw listener
-        expect_priority: 60
-      - node: /camera_node      # group omitted = the node's default callback group
-        policy: fifo
-        priority: 70
+        group: grab               # omitted = the node's default callback group
+        policy: fifo              # inherit / other / fifo / rr
+        priority: 55
         cpus: [2]
+        children: reset           # reset (default) / inherit
       - node: /perception_node
         group: infer
         policy: fifo
-        priority: 75
+        priority: 70
+        cpus: [3]
+        children: inherit         # OpenMP team threads do this stage's work
       - node: /control_node
         group: loop
         policy: fifo
-        priority: 90
+        priority: 80
+        cpus: [4]
 ```
 
-```cpp
-#include "cyra/spec.hpp"
+| Key | Where | Meaning |
+| --- | --- | --- |
+| `target` | chain | `hard` or `soft`. Required |
+| `criticality` | chain | 0 or more, default 0 |
+| `stages` | chain | The threads in the order data flows |
+| `node`, `group` | stage | A ROS thread: fully-qualified node name and group label |
+| `name` | stage | Any other thread. Must not start with `/` and takes no `group` |
+| `kind` | stage | `worker` (default) computes. `release` only hands work on: an IRQ thread, a DDS receive thread, a timer thread |
+| `policy`, `priority`, `cpus`, `children` | stage | What cyra applies (section 3) |
+| `external`, `expect_priority` | stage | A thread cyra does not set. Only `expect_priority` (1..99, 0 undeclared) may be written. Every applying entry point refuses it; `verify` checks it |
+| `match` | stage | `{irq: <handler>}` or `{process: <comm>, thread: <comm>}`: a thread no code of ours runs on, which the daemon `cyrad` finds and sets. `bind` and `apply_checked` refuse it (`docs/en/daemon.en.md`) |
+| `children_cpus` | stage | Where `cyrad` moves the reset children of this stage. Needs `cpus`, `children: reset`, and no cpu in common with `cpus` |
 
-cyra::Spec spec = cyra::Spec::load();   // CYRA_SPEC. empty spec if absent
-const std::string name = node->get_fully_qualified_name();
-if (!spec.empty()) {
-  std::thread worker([&spec, &name] {   // a thread I created applies it to itself
-    cyra::apply_checked(spec.stage(name, "infer_worker"));
-    cyra::verify(spec.stage(name, "infer_worker"), cyra::this_tid());
-  });
-  worker.join();
-}
-for (const cyra::Stage * e : spec.external()) {   // stages cyra does not apply
-  log(e->node, cyra::verify(*e, foreign_tid).to_string());   // verify, not only record
-}
+Rules, checked when the file is read. Every rule reports the stages that break it.
+
+| Rule | Checked |
+| --- | --- |
+| Flow | In one chain, a downstream worker runs at or above an upstream worker whenever the two can share a cpu. Equal is fine: FIFO does not preempt at equal priority. Stages on disjoint cpus never preempt each other and are not compared |
+| Release | A release stage runs strictly above every worker of its chain it can share a cpu with. Below them, the work it hands on is released late |
+| Criticality | On a shared cpu, every RT stage of a more critical chain runs strictly above every RT stage of a less critical one. A stage on several chains takes their highest criticality |
+| Hard core | Where a hard chain is involved, two RT workers are not pinned to one cpu. SCHED_FIFO has no timeslice, so one would hold the core until it blocks. Release stages do not count |
+| One declaration | A stage on two chains is declared the same way on both. Its strictness is the strictest of them |
+
+- "Can share a cpu" means the `cpus` overlap. No `cpus`, and an external stage, can land anywhere, so they share every cpu.
+- Stages that are not RT (`policy: other`, `inherit`, external with `expect_priority: 0`) take part in no rule.
+- Unknown keys are refused. There is no version field: a version announces a schema change but does not catch `priorty`.
+- `cyra::Spec::load(path)` reads a file and `cyra::Spec::load()` reads `CYRA_SPEC` (unset gives an empty spec, `empty()` is true). `stages()` lists every stage, `find(target, group)` returns one or null, `stage(target, group)` returns one or throws, `external()` lists the external ones.
+- A `cyra::Stage` carries `match` (a `Match` with `irq`, `process`, `thread`, and `empty()`), `children_cpus`, `node`, `group`, `name`, `kind` (`Kind::Worker` or `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, and `chain` (which chain declared it first).
+
+## 3. Applying
+
+Everything here applies to the calling thread only. A thread is never set from outside, so there is no window where another thread has half-configured it.
+
+The functions are in `cyra/spec.hpp`, which includes `cyra/rt.hpp`.
+
+```cpp doc:apply
+cyra::Options o;
+o.policy = cyra::Policy::Fifo;       // Inherit / Other / Fifo / RoundRobin
+o.priority = 70;                     // 1..99 for Fifo/RoundRobin, else 0
+o.cpus = {3};                        // empty leaves affinity alone
+o.children = cyra::Children::Reset;  // Reset / Inherit
+
+cyra::Report rep = cyra::apply_checked(o, cyra::Strictness::Hard, /*control_priority=*/80);
+rep = cyra::apply_checked(spec.stage("/perception_node", "infer"));  // a stage from a Spec
+rep = cyra::bind("/perception_node", "infer");                       // the stage from CYRA_SPEC
 ```
 
-`cyra::Stage` holds everything the file knows about that stage: `node`, `group`, `external`, `expect_priority`, `opts`, `strict`, `control_priority`, and which chain declared it (`chain`). `cyra::Spec` gives all of them with `stages()`, one with `find()`, and only the ones cyra does not apply with `external()`. Python reads the file through the same parser (section 4).
+- `apply_checked(opts, strict=Soft, control_priority=0)` runs `preflight` first. If the verdicts block, it throws `std::runtime_error` before touching the thread. It then applies, and reads back from the kernel: policy and priority must match, and the thread's cpus must lie within the requested ones (a cpuset may narrow the mask). A mismatch throws, with the thread already changed.
+- `Strictness` decides how `Warn` is read. `Soft` returns it in the report. `Hard` refuses it. `Fail` is refused by both.
+- `apply_checked(stage)` and `bind` take the stage whole, so the chain's strictness comes with it. Its report carries `priority-order` as Ok: the file checked the ordering at load.
+- One stage is one thread. While one live thread of this process holds a stage, another thread applying it throws `std::invalid_argument`. The holder applying it again is fine, and the stage is released when the holder exits.
+- An `Options` that asks for nothing does nothing, judgement included, and returns an empty report.
+- `Options::validate()` refuses what would be reinterpreted: an RT policy without priority 1..99, a priority without an RT policy, `children = Inherit` without an RT policy, a cpu id beyond the kernel set size.
+- The kernel refusing is `std::system_error`. There is no silent downgrade.
 
-- `stages` is the order in which data flows. RT priority must increase in that direction. An upstream stage that preempts a downstream one starves it. Non-RT stages such as `policy: other` are outside this rule.
-- `control_priority` is derived by the file. The last RT priority in the chain is control, and that stage itself gets 0.
-- Unknown keys are refused. There is no version field.
-- One stage appearing in two chains is normal. If the two chains declare it differently, it is refused. Its `strict` is the strictest of those chains: a stage on a hard chain is hard whichever chain the file lists first.
-- A hard chain gives each RT stage its own core. If two are pinned to the same core, it is refused. `SCHED_FIFO` has no timeslice, so one blocks the other completely. A soft chain allows it.
-- An `external` stage carries only `expect_priority`, 1..99 or 0 for undeclared. It cannot have `policy`/`priority`/`cpus`, and every entry point that applies a stage refuses it.
-- If `CYRA_SPEC` is unset or empty, the spec is empty. That is the same no-op as declaring nothing.
-- `stage(node, group)` takes the node's fully-qualified name (`get_fully_qualified_name()`). Looking up a label not in the file throws.
-- `apply_checked(stage)` puts the calling thread on the stage, with the chain's strictness and control priority. It takes the whole stage, because unpacking `strict` and `control_priority` into fields loses them. One stage is one thread: while one live thread of this process holds a stage, another thread applying it throws `std::invalid_argument`. The holder applying it again is allowed, and a thread that exits releases it.
-- `verify(stage, tid)` applies nothing and only compares the declaration with reality. The findings are three: `observed-policy`, `observed-priority`, and `observed-cpus`. Items the file does not claim are `Unknown`. `observed-cpus` is Ok while the thread runs within the declared cpus, the same reading `apply_checked` confirms, so a cpuset that narrows the mask passes and a cpu outside the declaration fails. A thread that cannot be read is an `observed-thread` Fail. The caller supplies `tid`.
-- `verify_process(spec)` asks the other question: is anything in this process running RT that the file never described. A thread is explained when it runs at some stage's declared policy, priority and cpus, which is also what a callback's fork-join child holds, so a child needs no declaration. Each thread nothing explains is one `undeclared-rt-thread` Warn naming its tid. When every RT thread is explained, one `undeclared-rt-thread` Ok says so. A Warn, not a Fail: cyra cannot know whether a thread it did not declare is a mistake.
+### Children
 
-## 3. flux PartitionedExecutor (C++, `cyra_flux`)
+Linux gives a new thread its parent's policy, priority, and cpus, and `fork()` and `exec()` keep them. An RT thread that calls into a library leaks RT into every pool, logger, and `system()` the library starts.
 
-`flux::ros::PartitionedExecutor` gives each callback group its own thread. `cyra::flux::schedule` puts a declaration on that thread.
+| `children` | Children start as | For |
+| --- | --- | --- |
+| `Reset` (default) | SCHED_OTHER, priority 0 | Library pools, loggers, subprocesses: anything not modeled as this stage |
+| `Inherit` | The parent's policy and priority | Fork-join helpers doing this stage's work, such as OpenMP team threads |
 
-```cpp
-#include "cyra/flux.hpp"
+- `Reset` is `SCHED_RESET_ON_FORK`. It covers `pthread_create` as well as `fork`, and only takes effect with an RT policy.
+- Affinity is inherited either way. The kernel has no flag against it, so a reset child still runs on the stage's cpus, only when the stage's thread sleeps.
+- Once a thread is set with `Reset`, only `CAP_SYS_NICE` can clear the flag. The same thread cannot later switch to `Inherit` without it; the refusal says so.
+- A long-lived helper that needs its own scheduling is its own stage: bind it inside the helper, or declare it `external`.
 
-flux::ros::PartitionedExecutor ex;
-ex.add_ros_node(node);
-cyra::flux::schedule(ex, group, {cyra::Policy::Fifo, 90, {3}});   // values
-cyra::flux::schedule(ex, *node, infer_group, spec.stage(name, "infer"));   // a stage of the file
-ex.spin();
+## 4. Checking
+
+```cpp doc:check
+cyra::Report host = cyra::preflight(o, /*control_priority=*/80);  // judges, changes nothing
+cyra::ThreadState self = cyra::current();                          // this thread, from the kernel
+int tid = cyra::this_tid();                                        // the kernel's id for it
+cyra::ThreadState other = cyra::observe(tid);                      // any thread, any process
+cyra::Report drift = cyra::verify(stage, tid);                     // a thread against its stage
+cyra::Report stray = cyra::verify_process(spec);                   // RT threads nothing explains
 ```
 
-- The child thread serving the group applies the declaration to itself with `apply_checked` before its first callback. A refusal becomes an error from `spin()`. It does not fall back to a weaker setting.
-- `schedule(ex, group, opts, strict, control_priority)` checks `opts` on the spot. `strict` defaults to `Soft` and `control_priority` to 0 (undeclared).
-- `schedule(ex, node, group, stage)` checks the stage's name against the group on the spot. An rclcpp callback group has no name, so this pairing is the only link between the file's `(node, label)` and the thread. The group must belong to `node`, `node` must be the one the stage names, and an empty label means that node's default callback group. An `external` stage is refused.
-- One declaration per group, and the group must be served by `ex`. Both are checked by the executor: a second declaration throws on the spot, and a declaration for a group no child serves is refused by `spin()`.
-- Two groups given one stage are refused by `spin()`. The second child to apply it throws, since one stage is one thread (section 2).
-- Call `spin()` from a `SCHED_OTHER` thread. Every child starts on the calling thread's scheduling, so from an RT caller a group with no declaration would run at that priority, above the declared groups. flux does not check this. `verify_process` reports such threads as `undeclared-rt-thread`.
+A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`, and `detail`. `Verdict` is `Ok`, `Warn`, `Fail`, or `Unknown`, and `Unknown` means the source could not be read, not a pass. `ok()` is "no `Fail`". `find(id)` returns one finding or null. `to_string()` is for people to read, not to parse.
+
+`preflight` findings:
+
+| id | Source | Fail / Warn |
+| --- | --- | --- |
+| `policy-permission` | `CapEff` (CAP_SYS_NICE) and `RLIMIT_RTPRIO` | Fail: no permission |
+| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us` | Warn: the throttle takes the cpu from a busy RT thread regardless of priority |
+| `priority-order` | `opts.priority` against `control_priority` | Fail: at or above the control loop. Unknown when `control_priority` is 0 |
+| `cpu-online` | `/sys/devices/system/cpu/online` | Fail: the cpu does not exist |
+| `cpu-isolation` | `/sys/devices/system/cpu/isolated`, `nohz_full` | Warn: the cpu is shared with other tasks |
+| `rcu-offload` | `rcu_nocbs` in `/proc/cmdline`, `nohz_full` | Warn: deferred kernel frees run on the RT cpu |
+| `irq-affinity` | `/proc/irq/*/effective_affinity_list` | Warn: interrupt handlers preempt every task on the cpu |
+| `cpu-governor` | `cpufreq/scaling_governor` | Warn: frequency ramp adds wakeup latency |
+| `kernel-preemption` | `/sys/kernel/realtime`, `/proc/version` | Warn: not PREEMPT_RT |
+| `memory-lock` | `VmLck` in `/proc/self/status` | Warn: no locked memory; a page fault is an unbounded stall |
+
+`verify(stage, tid)` applies nothing. `chrt`, systemd, or a later apply can move a thread after cyra set it; this is how that is seen.
+
+| id | Meaning |
+| --- | --- |
+| `observed-thread` | Fail: the thread cannot be read. A thread that is gone must not read as a thread at rest |
+| `observed-policy` | The declared policy against the thread's |
+| `observed-priority` | The declared priority (or `expect_priority`) against the thread's |
+| `observed-children` | The declared `children` against the thread's `SCHED_RESET_ON_FORK` |
+| `observed-cpus` | Ok while the thread's cpus lie within the declared ones |
+
+Items the file does not claim are `Unknown`.
+
+`verify_process(spec)` lists every RT thread of this process that no stage explains, one `undeclared-rt-thread` Warn per thread, or one Ok when there is none. A thread is explained when it holds a stage (`bind`, `spawn`, `apply_checked`), or when it runs at the declared scheduling of a stage with `children: inherit`. A thread that merely runs at a stage's values got there without cyra and is listed. It is a Warn, not a Fail: cyra cannot know whether an undeclared thread is a mistake.
+
+### Other processes
+
+A thread that holds a stage is recorded, so other processes can see it. Each process that binds keeps one record, `/dev/shm/cyra.<pid>.<starttime>` (`CYRA_RUN_DIR` moves it), write-locked for as long as it lives. The kernel drops the lock when the process exits, so a reader tells a live record from a dead one without asking the process. A forked child does not keep its parent's record alive.
+
+- `bindings()` lists every stage held on this host: `Binding` has `node`, `group`, `name`, `pid`, and `tid`. Records of exited processes and entries of ended threads are left out. Reading deletes nothing; the next process that creates its record sweeps the dead ones.
+- `verify_process(spec, pid)` asks the `verify_process(spec)` question about another process, with the holders read from its record. A process that is gone is an `observed-process` Fail. A process with no record gets a `record` Unknown, since which of its threads hold a stage is then not known.
+- When the record cannot be written, the apply still stands and its report carries a `record` Unknown: other processes will not see that thread.
+
+`ThreadState` has `policy` (the raw `SCHED_*` number, since a thread may hold a class `Policy` does not name), `priority`, `cpus`, and `reset_on_fork`.
+
+## 5. flux `PartitionedExecutor`
+
+`flux::ros::PartitionedExecutor` gives each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front.
+
+The functions are in `cyra/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
+
+```cpp doc:flux
+cyra::flux::bind(ex, *node, grab_group, "grab");  // the stage from CYRA_SPEC
+cyra::flux::apply_checked(ex, *node, infer_group, opts, cyra::Strictness::Hard);  // values
+cyra::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // a Spec's stage
+```
+
+- `group` must belong to `node`. `nullptr` means the node's default group.
+- An rclcpp callback group has no name, so the call is the only link between the file's `(node, label)` and a thread. For a stage it is checked at the call: the stage names this node, an empty label goes with the default group, and a non-empty label with any other group. An `external` stage is refused.
+- One declaration per group, and `ex` must serve the group. A second declaration throws at the call; a declaration for a group no child serves is refused by `spin()`.
+- Call `spin()` from a SCHED_OTHER thread. Every child starts on the calling thread's scheduling, so under an RT caller a group with no declaration runs at that priority. `verify_process` lists such threads.
 - Put every input of one message_filters synchronizer in one group. The sync policy runs the matched callback under its own `std::mutex`, which has no priority inheritance, so inputs on two group threads tie the two groups' priorities together.
-- The message_filters path allocates (policy queues and `shared_ptr` control blocks per frame). Keep it out of a hard chain. Plain flux delivery does not allocate.
+- The message_filters path allocates (policy queues, a `shared_ptr` control block per frame). Keep it out of a hard chain. Plain flux delivery does not allocate.
 
-## 4. Python (`cyra_py`)
+## 6. Python
 
-`cyra` is a direct binding of the C++ core. Only the applying side is exposed. `preflight`, `Report`, and `Strictness` are the hard RT judgment machinery and are not in the Python surface.
-
-It is not an RT guarantee. Whatever priority is set, the GIL and GC remain unbounded sources of delay. What it decides is which thread the kernel picks when several are runnable at once, and which core each uses. There is still a value to set, because threads actually run in parallel in sections that release the GIL. numpy, zlib, and decoding are those sections.
-
-```python
+```python doc:python
 import cyra
-
-report = cyra.apply(cpus=[4])          # the calling thread
-state = cyra.current()                 # read back from the kernel
-klass, prio, where = state.policy, state.priority, state.cpus
-tid = cyra.this_tid()                  # the number top -H and /proc use
-
-spec = cyra.Spec.load()                # CYRA_SPEC. empty spec when unset
-if not spec.empty():
-    cyra.apply(spec.stage(node.get_fully_qualified_name(), "infer_worker"))
-```
-
-- `cyra.apply(policy=, priority=, cpus=)` applies to the calling thread and runs preflight at `Soft`. After applying, it reads back from the kernel and compares, so a request that did not land as is, because a cpuset narrowed the mask, does not pass as success. Kernel refusal is `OSError`, a request that does not hold on this host or a mismatched read-back is `RuntimeError`, and an out-of-range value is `ValueError`. If nothing is requested, nothing is done.
-- `cyra.apply(stage)` puts the calling thread on a stage. A stage on a hard chain is applied at `Hard`, so a preflight Warn refuses it too. An external stage, or a stage another live thread holds, is `ValueError`.
-- The string `apply` returns is the host judgment report. It is meant for people to read, not a format to parse. It is an empty string when nothing was requested.
-- `policy` is one of `cyra.Policy`: `Inherit` (default, untouched), `Other` (SCHED_OTHER), `Fifo` (SCHED_FIFO), `RoundRobin` (SCHED_RR). `Fifo` and `RoundRobin` require `priority` 1..99 and `RLIMIT_RTPRIO` or `CAP_SYS_NICE`. Setting only affinity needs no permission.
-- `cyra.current()` returns a `cyra.ThreadState`. `policy` is a raw `SCHED_*` integer, not a `Policy` (compare with `os.SCHED_FIFO`), `priority` is an integer, and `cpus` is a list of core numbers.
-- `cyra.this_tid()` is the kernel thread id. It differs from the number `threading.get_ident()` gives.
-- `cyra.Spec.load(path=None)` parses `path`, or the file `CYRA_SPEC` names. Unset gives an empty spec, and `empty()` says so. A rule the file breaks is `RuntimeError`. `spec.stage(node, group="")` takes the node's fully-qualified name, and a stage the file does not name is `RuntimeError`.
-- `cyra.Stage` is read-only: `node`, `group`, `chain`, `external`, `expect_priority`, `policy`, `priority`, `cpus`, `control_priority`.
-
-`cyra.flux` declares scheduling for the threads of a `flux.ros.PartitionedExecutor`.
-
-```python
 import cyra.flux
 
-cyra.flux.set_thread_scheduling(ex, group, cpus=[4, 5])
-cyra.flux.set_thread_scheduling(ex, node, policy=cyra.Policy.Fifo, priority=20)
-cyra.flux.schedule(ex, infer_group, spec.stage(name, "infer"))
+cyra.bind(node.get_fully_qualified_name(), "loop")
+t = cyra.spawn("/perception_node", "infer", run_inference)
+cyra.flux.bind(ex, node, group, "grab")
+
+rep = cyra.apply_checked(cyra.Options(cyra.Policy.Fifo, 20, [4]), cyra.Strictness.Soft)
+if not rep.ok():
+    print(rep.to_string())
+state = cyra.current()          # state.policy compares with os.SCHED_FIFO
 ```
 
-- The `unit` is either a callback group given to `add` or a node given to `add_ros_node`. In C++ it is one callback group, but rclpy splits the unit in two.
-- The child applies the declaration to itself before its first callback, and a refusal becomes an exception from `spin()`. An external stage is refused there too.
-- One declaration per unit, shared between the two functions. A declaration for a unit the executor does not run is refused by `spin()`.
-- The stage's node is not checked against the unit. C++ checks it, but a flux group in Python does not know its node.
-- `flux.ros.Executor` runs on the calling thread, so call `cyra.apply()` directly before its `spin()`.
+Every name in sections 1 to 5 exists in `cyra` or `cyra.flux` with the same arguments. `Options(policy=, priority=, cpus=, children=)` takes keywords. Errors map as follows.
 
-## 5. The connection to flux
+| C++ | Python |
+| --- | --- |
+| `std::system_error` (the kernel refused) | `OSError` |
+| `std::invalid_argument` (a request that would be reinterpreted, an external stage, a stage already held) | `ValueError` |
+| `std::runtime_error` (preflight blocked, read-back mismatch, a file rule, an unknown label) | `RuntimeError` |
 
-`cyra_flux` and `cyra.flux` link to flux directly and register the executor's `on_thread_start` hook (C++ `PartitionedExecutor::on_thread_start(group, fn)`, Python `PartitionedExecutor.on_thread_start(unit, fn)`). flux knows nothing about cyra. `cyra_core` and `cyra` do not depend on flux.
+Python is not an RT target. Whatever priority a thread holds, the GIL and GC stay unbounded sources of latency. What cyra settles for Python is which thread the kernel prefers when several are runnable and which cores each may use; that matters in the sections that release the GIL (numpy, decoding, I/O).
 
-This connection method is not fixed. The hook, the direct link, and the package split may change at any time, and code outside `cyra_flux` and `cyra.flux` must not rely on them.
+## 7. Where C++ and Python differ
+
+| Difference | Why |
+| --- | --- |
+| `spawn` returns `std::thread` in C++ and a started `threading.Thread` in Python | A Python function has to run on a thread Python started |
+| `cyra.flux` does not check that `group` belongs to `node` | A flux Python group does not know its node. The stage's node is still checked against `node` |
+| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_ros_node`) | rclpy splits the unit into groups and nodes; C++ has only groups |
+| `cyra.flux.apply_checked` takes `Options` or a `Stage` in one function | Python has no overloads |
+
+`cyra_py/test/test_surface.py` fails when a public name exists on one side only.
+
+## 8. What cyra does not do
+
+- It does not guarantee timing. Memory bandwidth interference, GPU driver ordering, timer phase, and sensor disparity are not solved by priorities. Passing preflight means the host is configured, not that a deadline holds.
+- The library does not set threads it cannot run code on (DDS internals, SDK threads, IRQ threads). The daemon `cyrad` does, for stages with `match`; without it, declare them `external` and `verify` them.
+- It does not derive priorities. You write them; the file rules check them.
+- An RT stage must block regularly. On PREEMPT_RT the per-cpu timer and RCU threads (`ktimers/N`, `rcuc/N`) run at FIFO 1, so a stage that never sleeps starves them on its cpu, and with `sched_rt_runtime_us=-1` nothing takes the cpu back.
+
+## 9. The connection to flux
+
+`cyra_flux` and `cyra.flux` link to flux and register the executor's `on_thread_start` hook. flux knows nothing about cyra, and `cyra_core` does not depend on flux. The hook, the direct link, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.

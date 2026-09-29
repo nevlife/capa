@@ -7,24 +7,31 @@
 #include <flux/ros/partitioned_executor.hpp>
 #include <rclcpp/node.hpp>
 
-// Scheduling for the threads of a flux PartitionedExecutor. Each call registers an
-// on_thread_start() hook, so the child serving the group applies the declaration to itself
-// before its first callback, and a refusal is the spin() error.
+#include <string>
+
+// Scheduling for the threads of a flux PartitionedExecutor. Each call is the cyra_core function
+// of the same name, run by the child that serves `group` before its first callback; a refusal is
+// the spin() error. `group` must belong to `node`, and nullptr means the node's default group.
 
 namespace cyra::flux
 {
 
-// `opts` for the child serving `group`. `strict` decides what a preflight Warn does;
-// `control_priority` is the consumer's control loop priority, 0 when undeclared.
-void schedule(
-  ::flux::ros::PartitionedExecutor & ex, const rclcpp::CallbackGroup::SharedPtr & group,
-  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0);
+// cyra::bind for the child serving `group`: the stage CYRA_SPEC declares for this node and
+// `label`. An empty label names the node's default group. The stage is looked up here, so a typo
+// throws now rather than at spin(). CYRA_SPEC unset registers nothing.
+void bind(
+  ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
+  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & label = "");
 
-// `stage` for the child serving `group`. An rclcpp callback group has no name, so the pairing
-// here is the only link between the file's (node, label) and the thread. Checked on the spot:
-// the group belongs to `node`, `node` is the one the stage names, and an empty label means that
-// node's default callback group. Rejects an external stage.
-void schedule(
+// cyra::apply_checked(opts, strict, control_priority) for the child serving `group`.
+void apply_checked(
+  ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
+  const rclcpp::CallbackGroup::SharedPtr & group, const Options & opts,
+  Strictness strict = Strictness::Soft, int control_priority = 0);
+
+// cyra::apply_checked(stage) for the child serving `group`. The stage must name this node, and
+// its label must match the group: empty for the default group, non-empty for any other.
+void apply_checked(
   ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
   const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage);
 

@@ -18,21 +18,40 @@ enum class Policy : std::uint8_t {
   RoundRobin,   // SCHED_RR: SCHED_FIFO plus a timeslice among equal priorities
 };
 
+// What threads created by the scheduled thread start with. Linux hands a child its parent's
+// policy, priority and affinity, so an RT thread that calls into a library leaks RT into every
+// pool, logger and system() that library starts. Reset stops the leak for policy and priority
+// (SCHED_RESET_ON_FORK, which covers pthread_create as well as fork). Affinity is inherited
+// either way; the kernel has no flag for it. Once a thread is set with Reset, only CAP_SYS_NICE
+// can take the flag off it again, so the same thread cannot later switch to Inherit without it.
+enum class Children : std::uint8_t {
+  Reset = 0,  // children start SCHED_OTHER
+  Inherit,    // children run as the parent, for fork-join helpers doing the parent's work
+};
+
 struct Options
 {
   Policy policy = Policy::Inherit;
-  int priority = 0;                 // 1..99 with Fifo/RoundRobin, else 0
-  std::vector<std::uint32_t> cpus;  // pin to these cores; empty = leave affinity alone
+  int priority = 0;                     // 1..99 with Fifo/RoundRobin, else 0
+  std::vector<std::uint32_t> cpus;      // pin to these cores; empty = leave affinity alone
+  Children children = Children::Reset;  // takes effect only with Fifo/RoundRobin
 
   // Rejects instead of reinterpreting.
   void validate() const;
 };
 
-// Apply to the calling thread, all-or-nothing: if the kernel refuses any part, what was
-// already changed is rolled back and std::system_error is thrown. Refusal is never
-// downgraded to a weaker setting. A thread that asked for RT and silently runs
-// SCHED_OTHER is the failure mode this interface exists to prevent.
+namespace detail
+{
+// The syscalls alone, on the calling thread, all-or-nothing: if the kernel refuses any part, what
+// was already changed is rolled back and std::system_error is thrown. No preflight and no
+// read-back, which is why it is not the public way in: apply_checked() and bind() are.
 void apply(const Options & opts);
+
+// The same on thread `tid` (0 = the calling thread). Setting a thread from outside is how the
+// daemon handles threads it cannot run code on, and nothing else does it: the thread runs
+// unscheduled until the daemon finds it, which a self-applying thread never does.
+void apply_to(int tid, const Options & opts);
+}  // namespace detail
 
 // What the calling thread actually has, read back from the kernel. `policy` is the raw
 // SCHED_* value: a thread may hold a policy this header does not name.
@@ -41,6 +60,7 @@ struct ThreadState
   int policy = 0;
   int priority = 0;
   std::vector<std::uint32_t> cpus;
+  bool reset_on_fork = false;  // SCHED_RESET_ON_FORK, split out of the kernel's policy value
 };
 ThreadState current();
 
@@ -95,7 +115,7 @@ struct Report
 // not run and a check that passed must not look alike.
 Report preflight(const Options & opts, int control_priority = 0);
 
-// preflight() then apply(), which is what the two are for: a bare apply() succeeds whenever the
+// preflight() then the syscalls, which is what the two are for: the syscalls succeed whenever the
 // kernel accepts the request, and the kernel accepts plenty of hosts that cannot hold a deadline.
 // Throws std::runtime_error with the report when the verdicts block, before
 // touching the thread; otherwise applies and returns the report so a Soft caller can log what it
@@ -105,7 +125,14 @@ Report preflight(const Options & opts, int control_priority = 0);
 // The applied state is confirmed by reading it back, not by trusting the syscall's return: a
 // request the kernel accepted can still land elsewhere. A mismatch throws, having already changed
 // the thread. The caller is told what it actually got rather than left believing the request.
-Report apply_checked(const Options & opts, Strictness strict, int control_priority = 0);
+Report apply_checked(
+  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0);
+
+namespace detail
+{
+// apply_checked() on thread `tid` (0 = the calling thread), read back with observe(). The daemon's.
+Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
+}  // namespace detail
 
 }  // namespace cyra
 

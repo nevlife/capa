@@ -1,35 +1,52 @@
-"""cyra for flux: scheduling for the threads of a flux.ros.PartitionedExecutor.
+"""cyra for flux: the cyra functions of the same name, run on a flux.ros.PartitionedExecutor thread.
 
-Each call registers the executor's `on_thread_start` hook, so the thread serving the unit applies
-the declaration to itself before its first callback, and a refusal is the spin() error.
+Each call registers the executor's `on_thread_start` hook, so the child serving the unit applies
+the declaration to itself before its first callback, and a refusal is the spin() error. The unit is
+`group`, or `node` when `group` is None (a node handed to `add_ros_node`).
+
+One structural difference from C++: a flux Python group does not know its node, so whether `group`
+belongs to `node` is not checked here.
 """
 
-from ._cyra import Policy, apply
+from ._cyra import Options, Spec, Stage, Strictness, apply_checked as _apply_checked
+
+__all__ = ["apply_checked", "bind"]
 
 
-def set_thread_scheduling(ex, unit, *, policy=None, priority=0, cpus=()):
-    """Declare the OS scheduling for the thread of `ex` that will serve `unit`.
+def _unit(node, group):
+    return node if group is None else group
 
-    `unit` is a callback group handed to `add`, or a node handed to `add_ros_node`.
 
-        ex.add(front_camera, control)
-        cyra.flux.set_thread_scheduling(ex, control, cpus=[4, 5])
-
-    `cyra.Policy.Fifo` needs RLIMIT_RTPRIO or CAP_SYS_NICE; affinity alone needs neither. One
-    declaration per unit, shared with `schedule`.
+def bind(ex, node, group, label=""):
+    """cyra.bind for the child serving `group`: the stage CYRA_SPEC declares for this node and
+    `label`. The stage is looked up now, so a typo raises here. CYRA_SPEC unset registers nothing.
     """
-    policy = Policy.Inherit if policy is None else policy
-    cpus = list(cpus)
-    ex.on_thread_start(unit, lambda: apply(policy=policy, priority=priority, cpus=cpus))
+    spec = Spec.load()
+    if spec.empty():
+        return
+    apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), label))
 
 
-def schedule(ex, unit, stage):
-    """Declare that the thread of `ex` serving `unit` runs as `stage` of the chain file.
-
-        spec = cyra.Spec.load()
-        cyra.flux.schedule(ex, group, spec.stage(node.get_fully_qualified_name(), "infer"))
-
-    The stage is taken whole: the chain's target and control-loop priority come with it. The
-    stage's node is not checked against the unit, because a flux group does not know its node.
-    """
-    ex.on_thread_start(unit, lambda: apply(stage))
+def apply_checked(ex, node, group, what, strict=Strictness.Soft, control_priority=0):
+    """cyra.apply_checked for the child serving `group`, with Options or a Stage."""
+    if isinstance(what, Stage):
+        if strict != Strictness.Soft or control_priority != 0:
+            raise TypeError("cyra: a Stage carries its own strictness; pass only the stage")
+        if what.external:
+            raise ValueError(
+                f"cyra: stage {what.node} is declared external, so cyra does not set it"
+            )
+        actual = node.get_fully_qualified_name()
+        if what.node != actual:
+            raise ValueError(f"cyra: stage names node {what.node} but was handed node {actual}")
+        if (what.group == "") != (group is None):
+            raise ValueError(
+                "cyra: an empty label names the node's default unit (group=None), and a label "
+                "names a group"
+            )
+        ex.on_thread_start(_unit(node, group), lambda: _apply_checked(what))
+        return
+    if not isinstance(what, Options):
+        raise TypeError("cyra: apply_checked takes Options or a Stage")
+    what.validate()
+    ex.on_thread_start(_unit(node, group), lambda: _apply_checked(what, strict, control_priority))

@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -92,6 +93,7 @@ struct Stage
 TEST(Chain, DeclaredStagesReachTheirThreads)
 {
   SpecFile file(kChain);
+  ::setenv("CYRA_SPEC", file.path().c_str(), 1);
   const auto spec = cyra::Spec::load(file.path());
   ASSERT_EQ(spec.stages().size(), 3u);
 
@@ -119,9 +121,8 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
       },
       opts);
     ex.add_ros_node(s.node);
-    // The call under test: strictness and control priority come from the chain, not from here.
-    cyra::flux::schedule(
-      ex, *s.node, s.group, spec.stage(s.node->get_fully_qualified_name(), s.label));
+    // The call under test: the file names the stage, and nothing about its scheduling is here.
+    cyra::flux::bind(ex, *s.node, s.group, s.label);
   }
 
   const cyra::Report rep = cyra::preflight(spec.stages().front().opts);
@@ -133,6 +134,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
     // The declaration must fail loudly rather than leave the chain running at default priority.
     EXPECT_THROW(ex.spin(run, 20'000'000), std::runtime_error);
     rclcpp::shutdown();
+    ::unsetenv("CYRA_SPEC");
     return;
   }
 
@@ -148,6 +150,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
   ex.stop();
   spinner.join();
   rclcpp::shutdown();
+  ::unsetenv("CYRA_SPEC");
 
   const int declared[3] = {10, 20, 30};
   for (int i = 0; i < 3; ++i) {
@@ -186,10 +189,9 @@ chains:
   const auto spec = cyra::Spec::load(file.path());
   const cyra::Stage * st = spec.find("/rtchain_worker", "infer_worker");
   ASSERT_NE(st, nullptr);
-  // The two values a node cannot derive from its own line, carried by the stage rather than by
-  // the call site -- which is why apply_checked takes the stage whole.
+  // A value a node cannot derive from its own line, carried by the stage rather than by the call
+  // site -- which is why apply_checked takes the stage whole.
   EXPECT_EQ(st->strict, cyra::Strictness::Soft);
-  EXPECT_EQ(st->control_priority, 30);
 
   const cyra::Report rep = cyra::preflight(st->opts);
   const cyra::Finding * perm = rep.find("policy-permission");
@@ -362,49 +364,74 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
 }
 
 // The other question the file answers: not "is this stage's thread right" but "is anything running
-// RT the file never described". A thread at a declared stage's values is explained by that stage,
-// which is also how a callback's fork-join child passes without a declaration of its own.
+// RT the file never described". The thread holding a stage is explained by it, and so is a child
+// of a stage that declares children=inherit. A thread that merely matches a stage's values got
+// there without cyra and is named.
 TEST(Chain, VerifyProcessNamesOnlyTheThreadsTheFileCannotExplain)
 {
-  SpecFile file(
-    "chains:\n  scan:\n    target: soft\n    stages:\n      - node: /rtchain_scan\n"
-    "        group: worker\n        policy: fifo\n        priority: 50\n");
+  SpecFile file(R"(
+chains:
+  scan:
+    target: soft
+    stages:
+      - {node: /rtchain_scan, group: worker, policy: fifo, priority: 50}
+      - {node: /rtchain_scan, group: pool, policy: fifo, priority: 60, children: inherit}
+)");
   const auto spec = cyra::Spec::load(file.path());
+  const cyra::Report perm_rep = cyra::preflight(spec.stage("/rtchain_scan", "pool").opts);
+  if (perm_rep.find("policy-permission")->verdict != cyra::Verdict::Ok) {
+    GTEST_SKIP() << "cyra-cap:rtprio host does not permit SCHED_FIFO";
+  }
 
   std::atomic<bool> stop{false};
   std::atomic<int> started{0};
-  std::atomic<int> declared_tid{0};
-  std::atomic<int> stray_tid{0};
-  auto hold = [&](int prio, std::atomic<int> & out) {
-    sched_param p{};
-    p.sched_priority = prio;
-    if (::sched_setscheduler(0, SCHED_FIFO, &p) == 0) out.store(cyra::this_tid());
+  std::atomic<int> holder_tid{0};
+  std::atomic<int> copycat_tid{0};
+  std::atomic<int> helper_tid{0};
+  auto park = [&] {
     ++started;
     while (!stop.load()) std::this_thread::sleep_for(1ms);
   };
-  std::thread declared([&] { hold(50, declared_tid); });
-  std::thread stray([&] { hold(41, stray_tid); });
-  while (started.load() < 2) std::this_thread::sleep_for(1ms);
+  std::thread holder([&] {
+    cyra::apply_checked(spec.stage("/rtchain_scan", "worker"));
+    holder_tid.store(cyra::this_tid());
+    park();
+  });
+  std::thread copycat([&] {
+    sched_param p{};
+    p.sched_priority = 50;
+    ::sched_setscheduler(0, SCHED_FIFO, &p);
+    copycat_tid.store(cyra::this_tid());
+    park();
+  });
+  std::thread pool([&] {
+    cyra::apply_checked(spec.stage("/rtchain_scan", "pool"));
+    std::thread helper([&] {
+      helper_tid.store(cyra::this_tid());
+      park();
+    });
+    park();
+    helper.join();
+  });
+  while (started.load() < 4) std::this_thread::sleep_for(1ms);
 
-  const bool got_rt = declared_tid.load() != 0 && stray_tid.load() != 0;
-  const cyra::Report rep = got_rt ? cyra::verify_process(spec) : cyra::Report{};
+  const cyra::Report rep = cyra::verify_process(spec);
   stop.store(true);
-  declared.join();
-  stray.join();
-  if (!got_rt) GTEST_SKIP() << "host does not permit SCHED_FIFO (RLIMIT_RTPRIO)";
+  holder.join();
+  copycat.join();
+  pool.join();
 
-  bool named_stray = false;
-  bool named_declared = false;
-  for (const cyra::Finding & f : rep.findings) {
-    if (f.detail.find("tid " + std::to_string(stray_tid.load()) + " ") != std::string::npos) {
-      named_stray = f.verdict == cyra::Verdict::Warn;
+  auto named = [&](int tid) {
+    for (const cyra::Finding & f : rep.findings) {
+      if (f.detail.find("tid " + std::to_string(tid) + " ") != std::string::npos) return true;
     }
-    if (f.detail.find("tid " + std::to_string(declared_tid.load()) + " ") != std::string::npos) {
-      named_declared = true;
-    }
-  }
-  EXPECT_TRUE(named_stray) << "priority 41 is in no stage of the file:\n" << rep.to_string();
-  EXPECT_FALSE(named_declared) << "priority 50 is what the file declares:\n" << rep.to_string();
+    return false;
+  };
+  EXPECT_FALSE(named(holder_tid.load())) << "the holder of a stage:\n" << rep.to_string();
+  EXPECT_FALSE(named(helper_tid.load())) << "a child of an inherit stage:\n" << rep.to_string();
+  EXPECT_TRUE(named(copycat_tid.load()))
+    << "a thread at a stage's values that cyra never put there:\n"
+    << rep.to_string();
   EXPECT_TRUE(rep.ok()) << "an undeclared thread is reported, not refused";
 }
 
@@ -429,6 +456,9 @@ chains:
   cyra::Options as_owner_would;
   as_owner_would.policy = cyra::Policy::Fifo;
   as_owner_would.priority = 60;
+  // An rmw listener does not set SCHED_RESET_ON_FORK, and the flag would stop the unprivileged
+  // move below from clearing it.
+  as_owner_would.children = cyra::Children::Inherit;
   const cyra::Report perm_rep = cyra::preflight(as_owner_would);
   const cyra::Finding * perm = perm_rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
@@ -440,7 +470,7 @@ chains:
   std::thread foreign([&] {
     // Stands in for the thread's real owner: an rmw listener, a driver, a CUDA worker. cyra never
     // sets this one, which is what `external` declares.
-    if (privileged) cyra::apply(as_owner_would);
+    if (privileged) cyra::detail::apply(as_owner_would);
     tid.store(cyra::this_tid());
     ready.store(true);
     while (!stop.load()) std::this_thread::sleep_for(1ms);
@@ -530,9 +560,9 @@ chains:
   flux::ros::PartitionedExecutor ex;
   ex.add_ros_node(node);
   const cyra::Stage & ext = spec.stage(node->get_fully_qualified_name(), "dds_listener");
-  EXPECT_THROW(cyra::flux::schedule(ex, *node, group, ext), std::invalid_argument);
+  EXPECT_THROW(cyra::flux::apply_checked(ex, *node, group, ext), std::invalid_argument);
   EXPECT_THROW(cyra::apply_checked(ext), std::invalid_argument);
-  EXPECT_NO_THROW(
-    cyra::flux::schedule(ex, *node, group, spec.stage(node->get_fully_qualified_name(), "work")));
+  EXPECT_NO_THROW(cyra::flux::apply_checked(
+    ex, *node, group, spec.stage(node->get_fully_qualified_name(), "work")));
   rclcpp::shutdown();
 }

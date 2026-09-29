@@ -23,6 +23,13 @@ ament_target_dependencies(chain rclcpp flux_example_msgs)
 target_compile_options(chain PRIVATE -Wall -Wextra -Wpedantic)
 install(TARGETS chain DESTINATION lib/${PROJECT_NAME})
 
+# The C++ fences of docs/*/api.*.md, compiled so a fence cannot name what does not exist. Never
+# run and never installed.
+add_library(cyra_doc_examples STATIC src/doc_api.cpp)
+target_link_libraries(cyra_doc_examples cyra_flux::cyra_flux flux_cpp::flux_cpp)
+ament_target_dependencies(cyra_doc_examples rclcpp)
+target_compile_options(cyra_doc_examples PRIVATE -Wall -Wextra -Wpedantic)
+
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 ament_package()
