@@ -23,6 +23,8 @@ std::uint64_t next(std::uint64_t & s)
 
 void run(const std::string & text)
 {
+  // libFuzzer's entry point takes bytes.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
   LLVMFuzzerTestOneInput(reinterpret_cast<const std::uint8_t *>(text.data()), text.size());
 }
 
@@ -48,11 +50,12 @@ int main(int argc, char ** argv)
 {
   if (argc > 1) {
     for (int i = 1; i < argc; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): argv is a C array
       std::FILE * f = std::fopen(argv[i], "rb");
       if (f == nullptr) return 1;
       std::string text;
       char chunk[4096];
-      std::size_t got;
+      std::size_t got = 0;
       while ((got = std::fread(chunk, 1, sizeof chunk, f)) > 0) text.append(chunk, got);
       std::fclose(f);
       run(text);

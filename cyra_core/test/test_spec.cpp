@@ -29,6 +29,8 @@ public:
     std::ofstream out(path_);
     out << body;
   }
+  SpecFile(const SpecFile &) = delete;
+  SpecFile & operator=(const SpecFile &) = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
   const std::string & path() const { return path_; }
 
@@ -688,6 +690,8 @@ namespace
 struct SpecEnv
 {
   explicit SpecEnv(const std::string & path) { ::setenv("CYRA_SPEC", path.c_str(), 1); }
+  SpecEnv(const SpecEnv &) = delete;
+  SpecEnv & operator=(const SpecEnv &) = delete;
   ~SpecEnv() { ::unsetenv("CYRA_SPEC"); }
 };
 

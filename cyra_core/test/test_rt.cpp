@@ -29,6 +29,9 @@ struct RestoreThread
 {
   cyra::ThreadState saved = cyra::current();
 
+  RestoreThread() = default;
+  RestoreThread(const RestoreThread &) = delete;
+  RestoreThread & operator=(const RestoreThread &) = delete;
   ~RestoreThread()
   {
     // SCHED_RESET_ON_FORK, once set, clears only with CAP_SYS_NICE. Keep it rather than fail the

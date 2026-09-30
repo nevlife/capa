@@ -1,5 +1,7 @@
 #include "record.hpp"
 
+#include "parse_number.hpp"
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -13,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace cyra::record
 {
@@ -42,7 +45,7 @@ std::optional<std::string> read_fd(int fd)
   std::string out;
   char buf[4096];
   off_t off = 0;
-  ssize_t n;
+  ssize_t n = 0;
   while ((n = ::pread(fd, buf, sizeof buf, off)) > 0) {
     out.append(buf, static_cast<std::size_t>(n));
     off += n;
@@ -140,14 +143,18 @@ bool write_locked(int fd)
 
 // Only the final names count; a creator locks the file before renaming it into place, so a
 // record under its final name is never seen unlocked while its writer lives.
-bool record_name(const char * entry, int & pid, std::uint64_t & start)
+bool record_name(std::string_view entry, int & pid, std::uint64_t & start)
 {
-  unsigned long long p = 0;
-  unsigned long long s = 0;
-  char tail = 0;
-  if (std::sscanf(entry, "cyra.%llu.%llu%c", &p, &s, &tail) != 2) return false;
-  pid = static_cast<int>(p);
-  start = s;
+  constexpr std::string_view prefix = "cyra.";
+  if (entry.substr(0, prefix.size()) != prefix) return false;
+  const std::string_view rest = entry.substr(prefix.size());
+  const auto dot = rest.find('.');
+  if (dot == std::string_view::npos) return false;
+  const auto p = detail::parse_number<int>(rest.substr(0, dot));
+  const auto s = detail::parse_number<std::uint64_t>(rest.substr(dot + 1));
+  if (!p || !s || *p <= 0) return false;
+  pid = *p;
+  start = *s;
   return true;
 }
 
@@ -184,9 +191,10 @@ std::vector<Task> parse_earlier(const std::string & field)
   while (std::getline(items, item, ',')) {
     const auto colon = item.find(':');
     if (colon == std::string::npos) continue;
-    out.emplace_back(
-      std::atoi(item.substr(0, colon).c_str()),
-      std::strtoull(item.substr(colon + 1).c_str(), nullptr, 10));
+    const auto tid = detail::parse_number<int>(std::string_view(item).substr(0, colon));
+    const auto start =
+      detail::parse_number<std::uint64_t>(std::string_view(item).substr(colon + 1));
+    if (tid && start) out.emplace_back(*tid, *start);
   }
   return out;
 }
@@ -210,9 +218,13 @@ std::vector<Entry> parse_entries(const std::string & body)
       !std::getline(cols, earlier)) {
       continue;
     }
-    en.pid = std::atoi(owner.c_str());
-    en.tid = std::atoi(tid.c_str());
-    en.tid_start = std::strtoull(start.c_str(), nullptr, 10);
+    const auto pid = detail::parse_number<int>(owner);
+    const auto t = detail::parse_number<int>(tid);
+    const auto s = detail::parse_number<std::uint64_t>(start);
+    if (!pid || !t || !s) continue;
+    en.pid = *pid;
+    en.tid = *t;
+    en.tid_start = *s;
     en.earlier = parse_earlier(earlier);
     out.push_back(std::move(en));
   }
@@ -366,10 +378,10 @@ std::vector<Task> tasks_of(int pid)
   DIR * d = ::opendir(("/proc/" + std::to_string(pid) + "/task").c_str());
   if (d == nullptr) return out;
   while (const dirent * e = ::readdir(d)) {
-    if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
-    const int tid = std::atoi(e->d_name);
-    const std::uint64_t start = task_starttime(pid, tid);
-    if (start != 0) out.emplace_back(tid, start);
+    const auto tid = detail::parse_number<int>(e->d_name);
+    if (!tid) continue;
+    const std::uint64_t start = task_starttime(pid, *tid);
+    if (start != 0) out.emplace_back(*tid, start);
   }
   ::closedir(d);
   return out;

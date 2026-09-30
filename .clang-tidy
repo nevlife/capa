@@ -1,11 +1,18 @@
-# Defect classes only. Each disabled check below was run over this tree and every hit was a false
-# positive or intended.
+# Defect classes, the C++ Core Guidelines and CERT. Each disabled check below was run over this
+# tree and every hit was a false positive or intended. Of the Core Guidelines and CERT, the ones
+# left out flag the C interfaces a scheduling library is made of (fixed buffers handed to read(),
+# open() and snprintf() being variadic, operator[] on checked indices, octal modes and cpu masks
+# as numbers), ask for GSL types cyra does not use, or name process-wide state kept on purpose.
+# cert-err33-c flagged only snprintf, fprintf and remove here; the POSIX calls whose results
+# matter are not on its list.
 # Only cyra's own headers: the vendored nanobind under thirdparty/ is not ours to change.
 HeaderFilterRegex: '.*/cyra_[a-z]+/include/.*'
 Checks: >
   -*,
   bugprone-*,
+  cert-*,
   concurrency-*,
+  cppcoreguidelines-*,
   performance-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
@@ -18,6 +25,16 @@ Checks: >
   -concurrency-mt-unsafe,
   -performance-no-int-to-ptr,
   -performance-enum-size,
-  -performance-inefficient-string-concatenation
+  -performance-inefficient-string-concatenation,
+  -cert-err33-c,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-vararg
 CheckOptions:
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
   performance-unnecessary-value-param.AllowedTypes: '^::nanobind::'

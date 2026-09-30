@@ -37,14 +37,14 @@ colcon test
 
 | Language | Format | Lint |
 | --- | --- | --- |
-| C++ | clang-format | clang-tidy (`.clang-tidy`, needs the build's `compile_commands.json`) |
-| Rust (`cyra_daemon`) | rustfmt | clippy `-D warnings` (also compiles the C++ half of the bridge); `unsafe` only in the bridge and the signal mask; cargo audit against the RustSec advisory database when `Cargo.lock` changes (needs `cargo install cargo-audit` and the network) |
+| C++ | clang-format | clang-tidy: defect classes, the C++ Core Guidelines and CERT, less the checks `.clang-tidy` names and says why (needs the build's `compile_commands.json`) |
+| Rust (`cyra_daemon`) | rustfmt | clippy `pedantic` with `-D warnings` (also compiles the C++ half of the bridge), every `unsafe` block one operation with a `SAFETY:` comment; `unsafe` only in the bridge and the signal mask; cargo audit against the RustSec advisory database when `Cargo.lock` changes (needs `cargo install cargo-audit` and the network) |
 | Python | ruff-format | flake8 (defect classes), mypy over `cyra` with the tracked stub `cyra/_cyra.pyi` |
 | Markdown | markdownlint `--fix` | markdownlint |
 | Shell | | shellcheck |
 | YAML | | yamllint |
 
-Across the tree: no emoji, Hangul only in `.md`, every public name in both user documents (`scripts/check_api_docs.py`), the contract tables name tests that exist (`scripts/check_contracts.py`), document fences equal the compiled example regions (`scripts/check_doc_examples.py`), no untracked files under `docs/`, and the comment budget (C++ and Rust).
+Across the tree: every public name is in both user documents (`scripts/check_api_docs.py`), the contract tables name tests that exist (`scripts/check_contracts.py`), and document fences equal the compiled example regions (`scripts/check_doc_examples.py`).
 
 `colcon test` also runs: C++ and Python names match (`test_surface.py`), the tracked stub matches the binding (`test_stub.py`), the yaml fences of the documents load, the fuzz corpus, and the three document checks above. `-DCYRA_SANITIZER=thread` (or `address,undefined`) builds `cyra_core` with a sanitizer.
 

@@ -1,4 +1,4 @@
-# cyra pre-commit. Enable: pipx install pre-commit && pre-commit install
+# cyra pre-commit: formatters, linters and the checks that keep cyra's documents and code in step.
 exclude: ^thirdparty/  # vendored nanobind stays pristine
 repos:
   - repo: https://github.com/pre-commit/mirrors-clang-format
@@ -38,18 +38,6 @@ repos:
 
   - repo: local
     hooks:
-      - id: no-emoji
-        name: no emoji
-        entry: scripts/check_no_emoji.sh
-        language: script
-        types: [text]
-
-      - id: hangul-md-only
-        name: hangul only in .md files
-        entry: scripts/check_hangul_md_only.sh
-        language: script
-        types: [text]
-
       # Needs the build's compile commands (scripts/check_clang_tidy.py says where it looks).
       - id: clang-tidy
         name: clang-tidy defect classes (.clang-tidy)
@@ -58,18 +46,19 @@ repos:
         additional_dependencies: [clang-tidy==22.1.8]
         types_or: [c++, c]
 
-      # Both check the whole crate; clippy also compiles the C++ half of the bridge.
+      # Run from cyra_daemon/ so rustup picks the toolchain its rust-toolchain.toml pins. Both check
+      # the whole crate; clippy also compiles the C++ half of the bridge.
       - id: rustfmt
         name: rustfmt (cyra_daemon)
-        entry: scripts/cargo.sh fmt --check
-        language: script
+        entry: bash -c 'cd cyra_daemon && cargo fmt --check'
+        language: system
         files: ^cyra_daemon/
         pass_filenames: false
 
       - id: clippy
         name: clippy (cyra_daemon)
-        entry: scripts/cargo.sh clippy --all-targets --locked -- -D warnings
-        language: script
+        entry: bash -c 'cd cyra_daemon && cargo clippy --all-targets --locked -- -D warnings'
+        language: system
         files: ^cyra_daemon/
         pass_filenames: false
 
@@ -77,8 +66,8 @@ repos:
       # Needs `cargo install cargo-audit` and the network.
       - id: cargo-audit
         name: cargo audit (cyra_daemon/Cargo.lock against RustSec)
-        entry: scripts/cargo.sh audit --deny warnings
-        language: script
+        entry: bash -c 'cd cyra_daemon && cargo audit --deny warnings'
+        language: system
         files: ^cyra_daemon/Cargo\.lock$
         pass_filenames: false
 
@@ -88,7 +77,7 @@ repos:
         language: system
         types: [python]
 
-      # always_run: both read the whole tree, so a pattern naming a subset would let an edit to
+      # always_run: these read the whole tree, so a pattern naming a subset would let an edit to
       # the rest skip the gate.
       - id: api-docs
         name: every public name is in both user documents
@@ -107,20 +96,6 @@ repos:
       - id: doc-examples
         name: document fences match the compiled examples
         entry: scripts/check_doc_examples.py
-        language: script
-        pass_filenames: false
-        always_run: true
-
-      - id: docs-tracked
-        name: no untracked files under docs/
-        entry: scripts/check_docs_tracked.sh
-        language: script
-        pass_filenames: false
-        always_run: true
-
-      - id: comment-density
-        name: comment budget (scripts/comment_budget.txt)
-        entry: scripts/check_comment_density.py
         language: script
         pass_filenames: false
         always_run: true

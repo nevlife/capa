@@ -19,7 +19,8 @@ use cyrad::reconcile::{Reconciler, Roots, find_threads};
 
 fn serial() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn cpus() -> Vec<u32> {
@@ -291,16 +292,14 @@ fn a_matched_thread_goes_back_when_the_match_moves_to_another() {
 // other policy.
 #[test]
 fn a_thread_cyrad_could_not_put_back_is_not_set() {
-    let _serial = serial();
     #[allow(unsafe_code)]
     fn to_batch() {
         let p = libc::sched_param { sched_priority: 0 };
-        // SAFETY: a syscall on the calling thread with a valid parameter.
-        assert_eq!(
-            unsafe { libc::sched_setscheduler(0, libc::SCHED_BATCH, &p) },
-            0
-        );
+        // SAFETY: a syscall on the calling thread with a parameter that outlives it.
+        let rc = unsafe { libc::sched_setscheduler(0, libc::SCHED_BATCH, &raw const p) };
+        assert_eq!(rc, 0);
     }
+    let _serial = serial();
     let t = Target::with("cyrad_t_batch", to_batch);
     let f = SpecFile::new(&match_spec("cyrad_t_batch", *cpus().last().unwrap()));
     let mut rec = Reconciler::load(&f.path).unwrap();
@@ -350,7 +349,7 @@ fn holder() {
 
 struct Holder {
     proc: Child,
-    holder: i32,
+    bound: i32,
     other: i32,
 }
 
@@ -372,7 +371,7 @@ impl Holder {
         let tids: Vec<i32> = line[5..].split(' ').map(|t| t.parse().unwrap()).collect();
         Self {
             proc,
-            holder: tids[0],
+            bound: tids[0],
             other: tids[1],
         }
     }
@@ -410,7 +409,7 @@ fn moves_reset_children_off_the_stages_cpus() {
     assert!(contains(&lines, "moved child"), "{lines:?}");
     assert_eq!(ffi::observe(h.other).unwrap().cpus, [last]);
     assert_eq!(
-        ffi::observe(h.holder).unwrap().cpus,
+        ffi::observe(h.bound).unwrap().cpus,
         [first],
         "the holder is not the daemon's"
     );

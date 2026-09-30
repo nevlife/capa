@@ -1,4 +1,4 @@
-//! The daemon's only way into cyra_core. The chain file, its rules and every verdict stay in the
+//! The daemon's only way into `cyra_core`. The chain file, its rules and every verdict stay in the
 //! core; the Rust side walks /proc, loops and keeps what it set.
 
 #[cxx::bridge(namespace = "cyrad::bridge")]

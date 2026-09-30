@@ -1,13 +1,18 @@
 #include "cyra/rt.hpp"
 
+#include "parse_number.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 #if defined(__linux__)
@@ -63,7 +68,7 @@ std::optional<std::string> read_file(const char * path)
   if (fd < 0) return std::nullopt;
   std::string out;
   char buf[4096];
-  ssize_t n;
+  ssize_t n = 0;
   while ((n = ::read(fd, buf, sizeof buf)) > 0) out.append(buf, static_cast<std::size_t>(n));
   ::close(fd);
   if (n < 0) return std::nullopt;
@@ -82,20 +87,17 @@ std::string trimmed(std::string s)
 std::vector<std::uint32_t> parse_cpu_list(const std::string & text)
 {
   std::vector<std::uint32_t> out;
-  const std::string t = trimmed(text);
-  std::size_t pos = 0;
-  while (pos < t.size()) {
-    char * end = nullptr;
-    const unsigned long first = std::strtoul(t.c_str() + pos, &end, 10);
-    if (end == t.c_str() + pos) break;
-    unsigned long last = first;
-    pos = static_cast<std::size_t>(end - t.c_str());
-    if (pos < t.size() && t[pos] == '-') {
-      last = std::strtoul(t.c_str() + pos + 1, &end, 10);
-      pos = static_cast<std::size_t>(end - t.c_str());
-    }
-    for (unsigned long c = first; c <= last; ++c) out.push_back(static_cast<std::uint32_t>(c));
-    if (pos < t.size() && t[pos] == ',') ++pos;
+  std::istringstream items(trimmed(text));
+  std::string item;
+  while (std::getline(items, item, ',')) {
+    const std::string_view range(item);
+    const auto dash = range.find('-');
+    const auto first = detail::parse_number<std::uint32_t>(range.substr(0, dash));
+    const auto last = dash == std::string_view::npos
+                        ? first
+                        : detail::parse_number<std::uint32_t>(range.substr(dash + 1));
+    if (!first || !last) break;
+    for (std::uint64_t c = *first; c <= *last; ++c) out.push_back(static_cast<std::uint32_t>(c));
   }
   return out;
 }

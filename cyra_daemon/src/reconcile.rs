@@ -4,6 +4,7 @@
 //! core's verdicts is here; main only loops, reloads and stops.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -270,8 +271,9 @@ impl Reconciler {
         let mut t = format!("{STATE_HEAD}\n");
         for (key, o) in &self.owned {
             let (s, m) = (&o.original, &o.matcher);
-            t += &format!(
-                "owned\t{key}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            writeln!(
+                t,
+                "owned\t{key}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 o.pid,
                 o.tid,
                 o.start,
@@ -282,17 +284,20 @@ impl Reconciler {
                 m.irq,
                 m.process,
                 m.thread
-            );
+            )
+            .expect("a String takes any write");
         }
         for (task, m) in &self.moved {
-            t += &format!(
-                "moved\t{}\t{}\t{}\t{}\t{}\n",
+            writeln!(
+                t,
+                "moved\t{}\t{}\t{}\t{}\t{}",
                 m.stage,
                 m.pid,
                 task.tid,
                 task.start,
                 join_cpus(&m.original)
-            );
+            )
+            .expect("a String takes any write");
         }
         t
     }

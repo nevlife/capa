@@ -19,20 +19,21 @@ impl Signals {
     /// Block the three on the calling thread. Call it before starting any thread: a thread started
     /// earlier keeps the default handling and would be killed by SIGTERM instead.
     pub fn block() -> io::Result<Self> {
-        // SAFETY: sigset_t is plain data; sigemptyset initialises it and the calls only touch it
-        // and the calling thread's mask.
-        unsafe {
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut set);
-            for sig in [libc::SIGHUP, libc::SIGTERM, libc::SIGINT] {
-                libc::sigaddset(&mut set, sig);
-            }
-            let rc = libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
-            if rc != 0 {
-                return Err(io::Error::from_raw_os_error(rc));
-            }
-            Ok(Self { set })
+        // SAFETY: sigset_t is plain data, so all zeroes is a value; sigemptyset then defines it.
+        let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `set` is a live sigset_t, and the call writes only it.
+        unsafe { libc::sigemptyset(&raw mut set) };
+        for sig in [libc::SIGHUP, libc::SIGTERM, libc::SIGINT] {
+            // SAFETY: as above, with a valid signal number.
+            unsafe { libc::sigaddset(&raw mut set, sig) };
         }
+        // SAFETY: `set` is initialised and outlives the call; a null old mask is allowed.
+        let rc =
+            unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &raw const set, std::ptr::null_mut()) };
+        if rc != 0 {
+            return Err(io::Error::from_raw_os_error(rc));
+        }
+        Ok(Self { set })
     }
 
     /// The next of the three within `timeout`, or None when the timeout comes first.
@@ -42,7 +43,8 @@ impl Signals {
             tv_nsec: libc::c_long::from(timeout.subsec_nanos()),
         };
         // SAFETY: both pointers are to live values of the right type; a null siginfo is allowed.
-        let sig = unsafe { libc::sigtimedwait(&self.set, std::ptr::null_mut(), &ts) };
+        let sig =
+            unsafe { libc::sigtimedwait(&raw const self.set, std::ptr::null_mut(), &raw const ts) };
         match sig {
             libc::SIGHUP => Ok(Some(Signal::Reload)),
             libc::SIGTERM | libc::SIGINT => Ok(Some(Signal::Stop)),

@@ -1,5 +1,6 @@
 #include "cyra/spec.hpp"
 
+#include "parse_number.hpp"
 #include "record.hpp"
 
 #include <dirent.h>
@@ -509,6 +510,9 @@ std::string republish_locked()
 struct Held
 {
   std::string name;
+  Held() = default;
+  Held(const Held &) = delete;
+  Held & operator=(const Held &) = delete;
   ~Held()
   {
     if (name.empty()) return;
@@ -830,8 +834,9 @@ Report scan_threads(
   }
   int found = 0;
   while (const dirent * e = ::readdir(d)) {
-    if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
-    const int tid = std::atoi(e->d_name);
+    const auto parsed = detail::parse_number<int>(e->d_name);
+    if (!parsed) continue;
+    const int tid = *parsed;
     ThreadState st;
     try {
       st = observe(tid);

@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -229,6 +230,8 @@ public:
     std::ofstream out(path_);
     out << body;
   }
+  SpecFile(const SpecFile &) = delete;
+  SpecFile & operator=(const SpecFile &) = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
   const std::string & path() const { return path_; }
 
@@ -242,7 +245,7 @@ template <typename F>
 std::string refusal(F && call)
 {
   try {
-    call();
+    std::forward<F>(call)();
   } catch (const std::invalid_argument & e) {
     return e.what();
   } catch (...) {

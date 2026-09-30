@@ -42,6 +42,8 @@ public:
     std::ofstream out(path_);
     out << body;
   }
+  SpecFile(const SpecFile &) = delete;
+  SpecFile & operator=(const SpecFile &) = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
   const std::string & path() const { return path_; }
 
