@@ -1,12 +1,6 @@
-"""cyra for flux: the cyra functions of the same name, run on a flux.ros.PartitionedExecutor thread.
+"""The cyra functions of the same name, run by the PartitionedExecutor child serving the unit.
 
-Each call registers the executor's `on_thread_start` hook, so the child serving the unit applies
-the declaration to itself before its first callback, and a refusal is the spin() error. The unit is
-`group`, or `node` when `group` is None (a node handed to `add_ros_node`).
-
-One structural difference from C++: a flux Python group does not know its node, so whether `group`
-belongs to `node` is not checked here.
-"""
+A flux Python group does not know its node, so whether `group` belongs to `node` is not checked."""
 
 from ._cyra import Options, Spec, Stage, Strictness, apply_checked as _apply_checked
 
@@ -18,9 +12,7 @@ def _unit(node, group):
 
 
 def bind(ex, node, group, label=""):
-    """cyra.bind for the child serving `group`: the stage CYRA_SPEC declares for this node and
-    `label`. The stage is looked up now, so a typo raises here. CYRA_SPEC unset registers nothing.
-    """
+    """The stage is looked up now, so a typo raises here rather than at spin()."""
     spec = Spec.load()
     if spec.empty():
         return

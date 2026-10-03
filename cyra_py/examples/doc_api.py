@@ -1,8 +1,6 @@
-"""Never run. The Python fence of docs/*/api.*.md is the [doc:] region below.
+"""Never run: the [doc:] region below is the Python fence of docs/*/api.*.md.
 
-scripts/check_doc_examples.py keeps the two the same, and cyra_py/test/test_doc_examples.py checks
-that every cyra name the region uses exists.
-"""
+Kept equal by scripts/check_doc_examples.py; cyra_py/test/test_doc_examples.py checks the names."""
 
 
 def doc_python(node, ex, group, run_inference):

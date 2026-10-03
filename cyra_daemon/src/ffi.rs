@@ -1,5 +1,4 @@
-//! The daemon's only way into `cyra_core`. The chain file, its rules and every verdict stay in the
-//! core; the Rust side walks /proc, loops and keeps what it set.
+//! The daemon's only way into `cyra_core`: the chain file, its rules and every verdict stay there.
 
 #[cxx::bridge(namespace = "cyrad::bridge")]
 mod bridge {
@@ -23,7 +22,6 @@ mod bridge {
         children_cpus: Vec<u32>,
     }
 
-    /// `policy` is the raw SCHED_* value.
     #[derive(Clone, Debug, Default)]
     struct ThreadState {
         policy: i32,
@@ -48,8 +46,7 @@ mod bridge {
         start: u64,
     }
 
-    /// A held stage and the threads its process already had when it was bound: never its
-    /// children.
+    /// `earlier`: the threads its process had when the stage was bound, never its children.
     #[derive(Clone, Debug)]
     struct HeldStage {
         binding: Binding,
@@ -64,9 +61,8 @@ mod bridge {
 
         fn load(path: &str) -> Result<UniquePtr<Spec>>;
         fn stages(spec: &Spec) -> Vec<Stage>;
-        /// Empty when this host lets stage `index` run as declared on thread `tid`; preflight's
-        /// report when a Fail, or a Warn on a hard chain, refuses it. Memory is judged on the
-        /// thread's own process.
+        /// Empty, or preflight's report refusing stage `index` on thread `tid`. Memory is judged
+        /// on the thread's own process.
         fn refusal(spec: &Spec, index: usize, tid: i32) -> String;
         /// Empty when thread `tid` runs as stage `index` declares; verify's report when not.
         fn drift(spec: &Spec, index: usize, tid: i32) -> String;
@@ -82,8 +78,7 @@ mod bridge {
         fn held_stages() -> Vec<HeldStage>;
         /// The daemon's directory, checked like its record's.
         fn daemon_dir() -> Result<String>;
-        /// Publish the daemon's record (CYRA_DAEMON_DIR) as holding `held`. Empty, or why it
-        /// was not written.
+        /// Publish the daemon's record as holding `held`. Empty, or why it was not written.
         fn record(held: &[Binding]) -> String;
         fn task_starttime(pid: i32, tid: i32) -> u64;
         fn bind(target: &str) -> Result<()>;

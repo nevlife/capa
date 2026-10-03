@@ -5,9 +5,6 @@
 #include <string>
 #include <vector>
 
-// Thread scheduling for the hard-RT path. Everything here is opt-in; the default-constructed
-// Options is a full no-op.
-
 namespace cyra
 {
 
@@ -18,12 +15,7 @@ enum class Policy : std::uint8_t {
   RoundRobin,   // SCHED_RR: SCHED_FIFO plus a timeslice among equal priorities
 };
 
-// What threads created by the scheduled thread start with. Linux hands a child its parent's
-// policy, priority and affinity, so an RT thread that calls into a library leaks RT into every
-// pool, logger and system() that library starts. Reset stops the leak for policy and priority
-// (SCHED_RESET_ON_FORK, which covers pthread_create as well as fork). Affinity is inherited
-// either way; the kernel has no flag for it. Once a thread is set with Reset, only CAP_SYS_NICE
-// can take the flag off it again, so the same thread cannot later switch to Inherit without it.
+// Reset is SCHED_RESET_ON_FORK. Affinity is inherited either way: the kernel has no flag for it.
 enum class Children : std::uint8_t {
   Reset = 0,  // children start SCHED_OTHER
   Inherit,    // children run as the parent, for fork-join helpers doing the parent's work
@@ -36,25 +28,19 @@ struct Options
   std::vector<std::uint32_t> cpus;      // pin to these cores; empty = leave affinity alone
   Children children = Children::Reset;  // takes effect only with Fifo/RoundRobin
 
-  // Rejects instead of reinterpreting.
   void validate() const;
 };
 
 namespace detail
 {
-// The syscalls alone, on the calling thread, all-or-nothing: if the kernel refuses any part, what
-// was already changed is rolled back and std::system_error is thrown. No preflight and no
-// read-back, which is why it is not the public way in: apply_checked() and bind() are.
+// The syscalls alone, all-or-nothing: a refused part rolls back and throws std::system_error.
+// No preflight and no read-back, so the public way in is apply_checked() or bind().
 void apply(const Options & opts);
 
-// The same on thread `tid` (0 = the calling thread). Setting a thread from outside is how the
-// daemon handles threads it cannot run code on, and nothing else does it: the thread runs
-// unscheduled until the daemon finds it, which a self-applying thread never does.
+// On thread `tid` (0 = caller). Daemon only: a thread set from outside runs unscheduled until then.
 void apply_to(int tid, const Options & opts);
 }  // namespace detail
 
-// What the calling thread actually has, read back from the kernel. `policy` is the raw
-// SCHED_* value: a thread may hold a policy this header does not name.
 struct ThreadState
 {
   int policy = 0;
@@ -64,33 +50,20 @@ struct ThreadState
 };
 ThreadState current();
 
-// The calling thread's kernel thread id. std::thread::id names nothing the kernel knows, so a
-// thread that expects to be checked publishes this and observe() takes it.
 int this_tid();
 
-// What another thread runs at, read from the kernel exactly as current() reads self. Setting is
-// refused across threads but reading is not, and the two are not the same risk:
-// an observer opens no window where the thread is half-configured and leaves no silent failure if
-// it never runs. That asymmetry is what lets a chain be checked whole, the stages cyra does not
-// set included. Works across processes: an external stage is another node's thread.
-//
-// Throws std::system_error when the thread cannot be read, a thread that has exited included: a
-// thread that is gone and a thread at the wrong priority must not arrive as the same answer.
+// Throws std::system_error when the thread cannot be read, an exited one included: a thread that
+// is gone must not read as a thread at the wrong priority.
 ThreadState observe(int tid);
 
 enum class Verdict : std::uint8_t { Ok, Warn, Fail, Unknown };
 
-// How much of preflight's judgement blocks an apply. Fail always blocks under
-// both: the request cannot take effect as asked. Warn is the split. The request does take
-// effect, but the host is not configured for bounded latency, which soft RT tolerates and hard
-// RT does not. A caller that never states which it is gets the soft reading, so declaring Hard
-// is what turns those findings from a report nobody reads into a refusal.
 enum class Strictness : std::uint8_t {
   Soft,  // Warn findings are returned, not thrown
   Hard,  // Warn findings block the apply
 };
 
-// One preflight check. `id` is a stable slug; tests and tooling key on it.
+// `id` is a stable slug; tests and tooling key on it.
 struct Finding
 {
   std::string id;
@@ -107,34 +80,18 @@ struct Report
   std::string to_string() const;
 };
 
-// Judge whether `opts` can take effect on this host, and why not, before touching
-// anything. Every verdict comes from a kernel-readable source (rlimits, /proc, /sys),
-// not from guessing. `control_priority` declares the consumer's control
-// loop RT priority (0 = not declared); transport work must stay strictly below it. Left
-// undeclared, `priority-order` is reported Unknown rather than omitted. A check that did
-// not run and a check that passed must not look alike.
+// control_priority 0 reports `priority-order` Unknown: a check that did not run must not pass.
 Report preflight(const Options & opts, int control_priority = 0);
 
-// preflight() then the syscalls, which is what the two are for: the syscalls succeed whenever the
-// kernel accepts the request, and the kernel accepts plenty of hosts that cannot hold a deadline.
-// Throws std::runtime_error with the report when the verdicts block, before
-// touching the thread; otherwise applies and returns the report so a Soft caller can log what it
-// tolerated. Nothing is applied on a throw. Options that ask for nothing are a full no-op here
-// too, judgement included. There is no host to judge against an empty request.
-//
-// The applied state is confirmed by reading it back, not by trusting the syscall's return: a
-// request the kernel accepted can still land elsewhere. A mismatch throws, having already changed
-// the thread. The caller is told what it actually got rather than left believing the request.
+// A blocking verdict throws before the thread is touched. The result is read back, since an
+// accepted request can still land elsewhere; a mismatch throws with the thread already changed.
 Report apply_checked(
   const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0);
 
 namespace detail
 {
-// preflight() for thread `tid` (0 = the calling thread): memory-lock is judged on that thread's
-// process, not the caller's. The daemon's, which sets threads of other processes.
+// The daemon's, on thread `tid`: memory-lock is judged on its process; read-back is observe().
 Report preflight_to(int tid, const Options & opts, int control_priority);
-// apply_checked() on thread `tid` (0 = the calling thread), judged by preflight_to() and read back
-// with observe(). The daemon's.
 Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
 }  // namespace detail
 

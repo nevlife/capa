@@ -1,9 +1,6 @@
 """The Python surface is the C++ surface: same names, nothing missing, nothing extra.
 
-The C++ names are read from the public headers (scripts/cxx_names.py), so adding a function on
-one side and not the other fails here rather than in a user's port. spawn() is a template in C++
-and a function in Python; it is a name on both sides.
-"""
+The C++ names are read from the public headers by scripts/cxx_names.py."""
 
 import sys
 from pathlib import Path

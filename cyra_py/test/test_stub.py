@@ -1,8 +1,4 @@
-"""The tracked type stub is what the binding actually exports.
-
-cyra/_cyra.pyi is committed so a type checker sees the binding without a build. The build
-regenerates it from the compiled module; a binding changed without its stub fails here.
-"""
+"""cyra/_cyra.pyi is committed for type checkers without a build; it must equal the built stub."""
 
 import os
 from pathlib import Path

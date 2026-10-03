@@ -3,9 +3,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-// Ask whether this host can hold the schedule before anything is applied. Every verdict comes
-// from a kernel-readable source, so this answers on the machine it runs on rather than in
-// general.
+// Ask before applying anything whether this host can hold the schedule. Verdicts come from
+// kernel-readable sources, so the answer is about this machine.
 int main()
 {
   cyra::Options opts;
