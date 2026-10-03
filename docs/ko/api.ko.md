@@ -119,7 +119,7 @@ rep = cyra::bind("/perception_node", "infer");                       // CYRA_SPE
 
 - `apply_checked(opts, strict=Soft, control_priority=0)`는 `preflight`를 먼저 돌림. 판정이 막으면 스레드를 건드리기 전에 `std::runtime_error`를 던짐. 그다음 걸고 커널에서 되읽음. policy와 priority는 같아야 하고, 스레드의 CPU는 요청한 CPU 안에 있어야 함(cpuset이 마스크를 좁힐 수 있음). 어긋나면 예외를 던짐. 이때 스레드는 이미 바뀐 상태.
 - `Strictness`가 `Warn`을 읽는 방법을 정함. `Soft`는 report로 돌려주고 `Hard`는 거절함. `Fail`은 둘 다 거절함.
-- `apply_checked(stage)`와 `bind`는 stage를 통째로 받아 체인의 strictness가 함께 옴. report의 `priority-order`는 Ok. 순서는 파일이 읽을 때 검사했음.
+- `apply_checked(stage)`와 `bind`는 stage를 통째로 받아 체인의 strictness가 함께 옴. report의 `priority-order`는 Ok. 순서는 파일을 읽을 때 이미 검사됨.
 - 한 stage는 한 스레드. 이 프로세스의 살아 있는 스레드 하나가 stage를 쥐고 있는 동안 다른 스레드가 걸면 `std::invalid_argument`를 던짐. 쥔 스레드가 다시 거는 것은 허용. 쥔 스레드가 끝나면 풀림.
 - 아무것도 요청하지 않는 `Options`는 판정까지 포함해 아무것도 안 하고 빈 report를 돌려줌.
 - `Options::validate()`는 다르게 해석될 요청을 거절함. 대상: priority 1..99가 없는 RT 정책, RT 정책 없는 priority, RT 정책 없는 `children = Inherit`, 커널 집합 크기를 넘는 CPU 번호.
