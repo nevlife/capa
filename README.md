@@ -5,13 +5,13 @@ Thread scheduling for ROS 2 nodes on a dataflow path. One file declares how ever
 ```cpp
 cyra::bind("/control_node", "loop");                     // this thread
 auto t = cyra::spawn("/perception_node", "infer", fn);   // a new thread, set before fn runs
-cyra::flux::bind(ex, *node, group, "grab");              // a flux PartitionedExecutor group
+cyra::flux::bind(ex, *node, group, "grab");              // a flux or flux2 PartitionedExecutor group
 ```
 
 | Package | Contents |
 | --- | --- |
 | `cyra_core` | C++17, no ROS. The chain file (`cyra::Spec`), `bind`, `spawn`, `apply_checked`, `preflight`, `verify`, `verify_process` |
-| `cyra_flux` | The same functions for `flux::ros::PartitionedExecutor` threads |
+| `cyra_flux` | The same functions for `flux::ros::PartitionedExecutor` and `flux2::PartitionedExecutor` threads |
 | `cyra_py` | Python with the same names: `cyra` and `cyra.flux` |
 | `cyra_cli` | The `cyra` command: `cyra check` and `cyra status`, daemonless and read-only ([`docs/en/cli.en.md`](docs/en/cli.en.md)) |
 | `cyra_daemon` | `cyrad` (Rust, on `cyra_core` through a cxx bridge): sets the threads a file matches by name (interrupt, DDS, SDK threads) and moves reset children ([`docs/en/daemon.en.md`](docs/en/daemon.en.md)) |
@@ -50,7 +50,7 @@ Across the tree: every public name is in both user documents (`scripts/check_api
 
 ## Connection to flux
 
-`cyra_flux` and `cyra.flux` link to [flux](https://github.com/nevlife/flux) directly and register its `PartitionedExecutor::on_thread_start` hook. flux does not depend on cyra, and `cyra_core` does not depend on flux.
+`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a [flux](https://github.com/nevlife/flux) or flux2 `PartitionedExecutor`. They take the executor as a template parameter in C++ and as any object in Python, so neither links flux or flux2; their tests use both. flux and flux2 do not depend on cyra, and `cyra_core` depends on neither.
 
 This connection method may change at any time. The hook, the direct link, and the package split are the current arrangement, not a contract.
 

@@ -1,5 +1,6 @@
 #include "cyra/flux.hpp"
 
+#include <flux/ros/partitioned_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <std_msgs/msg/u_int64.hpp>

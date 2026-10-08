@@ -1,5 +1,6 @@
 #include "cyra/flux.hpp"
 #include "cyra/spec.hpp"
+#include "flux/ros/partitioned_executor.hpp"
 
 #include <string>
 

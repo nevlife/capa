@@ -28,6 +28,7 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 | X-018 | 허용된 RT 정책은 flux 자식 스레드에 도달한다 | `Schedule.ScheduleFifoMatchesPreflight` | `test_a_granted_policy_reaches_the_child` |
 | X-019 | 다른 프로세스는 어느 스레드가 stage를 쥐었는지 보고, 쥔 프로세스가 끝나면 사라진다 | `Record.AnotherProcessSeesTheStageAThreadHolds` | `test_another_process_sees_the_stage_a_thread_holds` |
 | X-020 | 데몬이 match하는 stage는 apply_checked와 bind가 거절한다 | `Bind.AMatchedStageIsRefused` | `test_a_matched_stage_is_refused` |
+| X-021 | flux bind는 flux2 executor의 그룹 자식 스레드에도 도달한다 | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 
 ## 2. 의도한 차이
 

@@ -6,7 +6,7 @@
 namespace cyra::flux
 {
 
-namespace
+namespace detail
 {
 
 // An rclcpp callback group has no name and does not know its node, so the pairing at this call
@@ -27,34 +27,11 @@ rclcpp::CallbackGroup::SharedPtr owned_group(
   return group;
 }
 
-}  // namespace
-
-void bind(
-  ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
-  const rclcpp::CallbackGroup::SharedPtr & group, const std::string & label)
+rclcpp::CallbackGroup::SharedPtr stage_group(
+  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage)
 {
-  const Spec spec = Spec::load();
-  if (spec.empty()) return;
-  apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), label));
-}
-
-void apply_checked(
-  ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
-  const rclcpp::CallbackGroup::SharedPtr & group, const Options & opts, Strictness strict,
-  int control_priority)
-{
-  opts.validate();
-  ex.on_thread_start(
-    owned_group(node, group, "flux::apply_checked"),
-    [opts, strict, control_priority] { cyra::apply_checked(opts, strict, control_priority); });
-}
-
-void apply_checked(
-  ::flux::ros::PartitionedExecutor & ex, rclcpp::Node & node,
-  const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage)
-{
-  detail::reject_external(stage, "flux::apply_checked()");
-  const std::string where = detail::stage_name(stage);
+  cyra::detail::reject_external(stage, "flux::apply_checked()");
+  const std::string where = cyra::detail::stage_name(stage);
   const std::string actual = node.get_fully_qualified_name();
   if (stage.node != actual) {
     throw std::invalid_argument(
@@ -75,7 +52,9 @@ void apply_checked(
       " names a group, but the group handed over is the node's default one, which the file "
       "spells as an omitted label");
   }
-  ex.on_thread_start(g, [stage] { cyra::apply_checked(stage); });
+  return g;
 }
+
+}  // namespace detail
 
 }  // namespace cyra::flux

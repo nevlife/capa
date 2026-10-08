@@ -5,7 +5,7 @@ cyra sets and checks the OS scheduling of the threads on a dataflow path: policy
 | Package | Contents | Depends on |
 | --- | --- | --- |
 | `cyra_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
-| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core`, `flux_cpp` |
+| `cyra_flux` | The same functions for the threads of a flux or flux2 `PartitionedExecutor` | `cyra_core` |
 | `cyra_py` | Python: `cyra` (the `cyra_core` names) and `cyra.flux` (the `cyra_flux` names) | `cyra_core` |
 
 C++ and Python have the same names, the same arguments in the same order, and the same defaults. The differences are only where a language forces one, and are listed in section 7.
@@ -30,7 +30,7 @@ A thread then says which stage it is. Which call depends on who created the thre
 | --- | --- | --- |
 | One you start | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
 | One that already runs (main, a thread you own) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
-| A flux `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+| A flux or flux2 `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
 
 - `bind(target, group="")` puts the calling thread on the stage, checks the host, and reads the result back from the kernel. `target` is a fully-qualified node name (`get_fully_qualified_name()`) with the group label, or a `name` stage's name with no group.
 - `spawn(target, group, fn)` starts a thread, binds it, and only then runs `fn`. It returns once the thread is set. If the bind is refused, `fn` never runs and the refusal is thrown to the caller. Prefer it over a thread that calls `bind` itself: that thread runs unscheduled until it reaches the `bind` line.
@@ -202,7 +202,7 @@ A record carries its length and a checksum, so one read in the middle of its rew
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::ros::PartitionedExecutor` gives each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front.
+`flux::ros::PartitionedExecutor` and `flux2::PartitionedExecutor` give each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter: either type, or anything with `on_thread_start(group, std::function<void()>)`. `cyra_flux` links neither, so include the executor's own header.
 
 The functions are in `cyra/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
 
@@ -251,7 +251,7 @@ Python is not an RT target. Whatever priority a thread holds, the GIL and GC sta
 | --- | --- |
 | `spawn` returns `std::thread` in C++ and a started `threading.Thread` in Python | A Python function has to run on a thread Python started |
 | `cyra.flux` does not check that `group` belongs to `node` | A flux Python group does not know its node. The stage's node is still checked against `node` |
-| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_ros_node`) | rclpy splits the unit into groups and nodes; C++ has only groups |
+| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_ros_node`, or `add_node` in flux2) | rclpy splits the unit into groups and nodes; C++ has only groups |
 | `cyra.flux.apply_checked` takes `Options` or a `Stage` in one function | Python has no overloads |
 
 `cyra_py/test/test_surface.py` fails when a public name exists on one side only.
@@ -265,4 +265,4 @@ Python is not an RT target. Whatever priority a thread holds, the GIL and GC sta
 
 ## 9. The connection to flux
 
-`cyra_flux` and `cyra.flux` link to flux and register the executor's `on_thread_start` hook. flux knows nothing about cyra, and `cyra_core` does not depend on flux. The hook, the direct link, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.
+`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a flux or flux2 executor, which they take as a template parameter (C++) or any object (Python), linking neither. flux and flux2 know nothing about cyra, and `cyra_core` depends on neither. The hook, the template, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.

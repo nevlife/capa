@@ -28,6 +28,7 @@ A new promise gets a row before it gets a claim in a user document.
 | X-018 | A granted RT policy reaches the flux child thread | `Schedule.ScheduleFifoMatchesPreflight` | `test_a_granted_policy_reaches_the_child` |
 | X-019 | Another process sees which thread holds a stage, until the holder exits | `Record.AnotherProcessSeesTheStageAThreadHolds` | `test_another_process_sees_the_stage_a_thread_holds` |
 | X-020 | A stage the daemon matches is refused by apply_checked and bind | `Bind.AMatchedStageIsRefused` | `test_a_matched_stage_is_refused` |
+| X-021 | flux bind reaches the group child of a flux2 executor as well | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 
 ## 2. Deliberate differences
 
