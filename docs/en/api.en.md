@@ -202,7 +202,7 @@ A record carries its length and a checksum, so one read in the middle of its rew
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::ros::PartitionedExecutor` and `flux2::PartitionedExecutor` give each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter: either type, or anything with `on_thread_start(group, std::function<void()>)`. `cyra_flux` links neither, so include the executor's own header.
+`flux::ros::PartitionedExecutor` and `flux2::PartitionedExecutor` give each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter, and it is one of these two types. `cyra_flux` links neither, so include the executor's own header.
 
 The functions are in `cyra/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
 

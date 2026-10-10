@@ -202,7 +202,7 @@ stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bi
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::ros::PartitionedExecutor`와 `flux2::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `cyra_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자다. 두 타입 모두, 그리고 `on_thread_start(group, std::function<void()>)`가 있는 무엇이든 받는다. `cyra_flux`는 둘 다 링크하지 않으므로 executor의 헤더는 직접 include한다.
+`flux::ros::PartitionedExecutor`와 `flux2::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `cyra_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자이고, 이 두 타입 중 하나다. `cyra_flux`는 둘 다 링크하지 않으므로 executor의 헤더는 직접 include한다.
 
 함수는 `cyra/flux.hpp`에 있다. 그룹당 선언이 하나라서 아래 세 형태는 서로 다른 그룹에 건다.
 
