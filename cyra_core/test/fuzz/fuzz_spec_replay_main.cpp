@@ -71,7 +71,9 @@ int main(int argc, char ** argv)
     for (int round = 0; round < 2000; ++round) {
       std::string m = s;
       for (int flip = 0; flip < 1 + static_cast<int>(next(seed) % 4); ++flip) {
-        m[next(seed) % m.size()] ^= static_cast<char>(1u << (next(seed) % 7));
+        const unsigned bit = 1u << (next(seed) % 7);
+        char & c = m[next(seed) % m.size()];
+        c = static_cast<char>(c ^ bit);
       }
       run(m);
     }

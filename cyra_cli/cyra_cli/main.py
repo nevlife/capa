@@ -5,6 +5,7 @@ a lock or writes, so running it against a live system cannot perturb what it rep
 """
 
 import argparse
+import datetime
 import os
 import signal
 import sys
@@ -12,6 +13,18 @@ import sys
 import cyra
 
 from .format import notable, scheduling, stage_name, table, verdict_word, worst
+
+# What a preflight run from this shell says about this shell, not about the host or a holder.
+_THIS_PROCESS = {
+    "policy-permission",
+    "priority-order",
+    "memory-lock",
+    "cpuset",
+    "cgroup-cpu",
+    "cgroup-memory",
+    "secure-exec",
+    "bind-now",
+}
 
 
 def _spec(path):
@@ -55,11 +68,36 @@ def cmd_check(args):
     print("\n".join(table(rows, ["STAGE", "CHAIN", "SCHEDULING", "HOST", "FINDINGS"])))
     print()
     print("permission is judged for this shell; the processes that bind may run with other limits.")
+    whole = cyra.preflight(spec)
+    _print_findings("the file on this host:", whole.findings, args.verbose)
     if args.verbose:
         for s in spec.stages():
             if not s.external:
                 print(f"\n{stage_name(s)}\n{cyra.preflight(s.opts).to_string()}", end="")
-    return 1 if blocked else 0
+    return 1 if blocked or not whole.ok() else 0
+
+
+def _print_findings(title, findings, verbose):
+    """Warn and Fail findings, or every one with --verbose; nothing when there is nothing to say."""
+    shown = [f for f in findings if verbose or f.verdict in (cyra.Verdict.Warn, cyra.Verdict.Fail)]
+    if shown:
+        print(f"\n{title}")
+        for f in shown:
+            print(f"  {verdict_word(f.verdict)} {f.id}: {f.detail}")
+
+
+def _host_drift(spec):
+    """Host findings for the stage cpus, as they stand now: preflight ran once, at bind."""
+    seen = {}
+    for f in cyra.preflight(spec).findings:
+        seen[(f.id, f.detail)] = f
+    for s in spec.stages():
+        if s.external or not s.opts.cpus:
+            continue
+        for f in cyra.preflight(s.opts).findings:
+            if f.id not in _THIS_PROCESS:
+                seen[(f.id, f.detail)] = f
+    return list(seen.values())
 
 
 def cmd_status(args):
@@ -88,7 +126,7 @@ def cmd_status(args):
             rows.append([name, "-", "-", "FAIL", f"held by {len(holders)} threads ({where})"])
         else:
             b = holders[0]
-            rep = cyra.verify(s, b.tid)
+            rep = cyra.verify(s, b.tid, datetime.timedelta(seconds=args.window))
             failed = failed or not rep.ok()
             rows.append([name, str(b.pid), str(b.tid), verdict_word(worst(rep)), notable(rep)])
             details.append(f"\n{name} (pid {b.pid}, tid {b.tid})\n{rep.to_string()}")
@@ -107,6 +145,9 @@ def cmd_status(args):
     if strays:
         print("\nthreads the file does not explain, in the processes above:")
         print("\n".join(strays))
+    drift = _host_drift(spec)
+    failed = failed or any(f.verdict == cyra.Verdict.Fail for f in drift)
+    _print_findings("the host now, for the stage cpus:", drift, args.verbose)
     if args.verbose:
         print("".join(details), end="")
     return 1 if failed else 0
@@ -128,6 +169,14 @@ def build_parser():
     status = verbs.add_parser("status", help="Which thread holds each stage, and how it runs.")
     status.add_argument("spec", nargs="?", help="Chain file (default: CYRA_SPEC).")
     status.add_argument("-v", "--verbose", action="store_true", help="Every finding, per holder.")
+    status.add_argument(
+        "-w",
+        "--window",
+        type=float,
+        default=0.0,
+        metavar="SEC",
+        help="Also read each holder's and its cpus' counters SEC apart (default 0: no counters).",
+    )
     status.set_defaults(func=cmd_status)
     return parser
 

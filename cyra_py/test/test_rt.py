@@ -366,3 +366,29 @@ def test_a_matched_stage_is_refused(tmp_path):
     assert st.match.process == "cam" and st.match.thread == "dds.recv"
     with pytest.raises(ValueError, match="daemon"):
         cyra.apply_checked(st)
+
+
+# The whole file on this host: hard stages on every online cpu leave none for housekeeping.
+def test_preflight_of_a_file_fails_a_host_left_without_housekeeping(tmp_path):
+    with open("/sys/devices/system/cpu/online") as f:
+        ranges = [r.split("-") for r in f.read().strip().split(",")]
+    online = [c for r in ranges for c in range(int(r[0]), int(r[-1]) + 1)]
+    stages = "".join(
+        f"      - {{name: s{c}, policy: fifo, priority: 10, cpus: [{c}]}}\n" for c in online
+    )
+    path = tmp_path / "chain.yaml"
+    path.write_text(f"chains:\n  all:\n    target: hard\n    stages:\n{stages}")
+    rep = cyra.preflight(cyra.Spec.load(str(path)))
+    assert rep.find("housekeeping").verdict == cyra.Verdict.Fail
+    assert not rep.ok()
+
+
+# A window adds counters read twice, so verify can say what happened to the thread meanwhile.
+def test_verify_with_a_window_reads_counters(tmp_path):
+    path = tmp_path / "chain.yaml"
+    path.write_text("chains: {c: {target: soft, stages: [{name: me, policy: other}]}}\n")
+    stage = cyra.Spec.load(str(path)).stage("me")
+    assert cyra.verify(stage, cyra.this_tid()).find("thread-faults") is None
+    rep = cyra.verify(stage, cyra.this_tid(), 0.05)
+    for id in ("thread-faults", "thread-migrations", "cpu-interrupts", "cgroup-throttle"):
+        assert rep.find(id) is not None, id

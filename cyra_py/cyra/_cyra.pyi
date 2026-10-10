@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import datetime
 import enum
 from typing import overload
 
@@ -191,12 +192,16 @@ def current() -> ThreadState: ...
 
 def observe(tid: int) -> ThreadState: ...
 
+@overload
 def preflight(opts: Options, control_priority: int = 0) -> Report: ...
+
+@overload
+def preflight(spec: Spec) -> Report: ...
 
 def this_tid() -> int:
     """The kernel tid; threading.get_ident() is not this number."""
 
-def verify(stage: Stage, tid: int) -> Report: ...
+def verify(stage: Stage, tid: int, window: datetime.timedelta = ...) -> Report: ...
 
 @overload
 def verify_process(spec: Spec) -> Report: ...

@@ -131,3 +131,23 @@ def test_a_held_stage_the_file_does_not_name_is_shown(tmp_path, capsys):
         child.kill()
         child.wait()
     assert "not in this file" in row(out, "/elsewhere")
+
+
+def test_check_reports_the_file_as_a_whole_on_this_host(tmp_path, capsys):
+    main(["check", spec_file(tmp_path), "-v"])
+    out = capsys.readouterr().out
+    assert "the file on this host:" in out
+    assert "housekeeping" in out and "foreign-rt-thread" in out
+
+
+def test_status_reads_counters_over_a_window(tmp_path, capsys):
+    spec = spec_file(tmp_path)
+    child, _ = holder(spec)
+    try:
+        main(["status", spec, "-w", "0.1", "-v"])
+        out = capsys.readouterr().out
+    finally:
+        child.kill()
+        child.wait()
+    for id in ("thread-faults", "cpu-interrupts", "cpu-softirqs", "the host now"):
+        assert id in out

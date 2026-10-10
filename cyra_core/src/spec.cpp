@@ -1,5 +1,6 @@
 #include "cyra/spec.hpp"
 
+#include "host.hpp"
 #include "parse_number.hpp"
 #include "record.hpp"
 
@@ -25,6 +26,11 @@ namespace cyra
 
 namespace detail
 {
+
+const std::vector<std::vector<std::size_t>> & chains(const Spec & spec)
+{
+  return spec.chains_;
+}
 
 std::string stage_name(const Stage & stage)
 {
@@ -428,6 +434,7 @@ Spec Spec::load(const std::string & path)
   }
   check_criticality(spec.stages_, crit);
   check_cpu_exclusivity(spec.stages_);
+  for (auto & chain : chains) spec.chains_.push_back(std::move(chain.members));
   return spec;
 }
 
@@ -728,7 +735,7 @@ bool explains(
 
 }  // namespace
 
-Report verify(const Stage & stage, int tid)
+Report verify(const Stage & stage, int tid, std::chrono::milliseconds window)
 {
   const std::string where = detail::stage_name(stage);
   Report rep;
@@ -814,11 +821,47 @@ Report verify(const Stage & stage, int tid)
       "stage " + where + " declares cpus " + cpu_list(stage.opts.cpus) +
         " and its thread may run on " + cpu_list(st.cpus));
   }
+  host::verify_now(rep, tid, st);
+  if (window.count() > 0) host::verify_window(rep, stage, tid, window);
   return rep;
 }
 
 namespace
 {
+
+// A reset child keeps the stage's affinity. On a hard stage's cpu, or a nohz_full one, it is a
+// second runnable task there; children_cpus is how it leaves.
+void shared_stage_cpus(
+  Report & rep, const Spec & spec, const std::map<std::string, int> & held_by,
+  const std::vector<std::pair<int, ThreadState>> & fair)
+{
+  const auto nohz =
+    host::parse_cpu_list(host::Fs{}.read("/sys/devices/system/cpu/nohz_full").value_or(""));
+  std::vector<std::string> crowded;
+  for (const auto & s : spec.stages()) {
+    if (held_by.count(detail::stage_name(s)) == 0 || s.opts.cpus.empty()) continue;
+    if (!s.children_cpus.empty() || s.opts.children != Children::Reset) continue;
+    if (s.strict != Strictness::Hard && !host::overlap(s.opts.cpus, nohz)) continue;
+    for (const auto & [tid, st] : fair) {
+      const bool holder = std::any_of(
+        held_by.begin(), held_by.end(), [t = tid](const auto & h) { return h.second == t; });
+      if (!holder && !st.cpus.empty() && within(st.cpus, s.opts.cpus)) {
+        crowded.push_back("tid " + std::to_string(tid) + " on " + detail::stage_name(s));
+      }
+    }
+  }
+  if (crowded.empty()) {
+    add(
+      rep, "stage-cpu-shared", Verdict::Ok,
+      "no reset child stays on a hard or nohz_full stage cpu");
+  } else {
+    add(
+      rep, "stage-cpu-shared", Verdict::Warn,
+      "SCHED_OTHER threads left on a hard or nohz_full stage's cpus: " +
+        host::list_some(crowded, 3) +
+        ". They compete for the cpu and keep the tick on; give the stage children_cpus");
+  }
+}
 
 Report scan_threads(
   const Spec & spec, const std::string & task_dir, const std::map<std::string, int> & held_by)
@@ -833,6 +876,8 @@ Report scan_threads(
     return rep;
   }
   int found = 0;
+  std::vector<std::pair<int, ThreadState>> fair;
+  std::vector<std::string> uring;
   while (const dirent * e = ::readdir(d)) {
     const auto parsed = detail::parse_number<int>(e->d_name);
     if (!parsed) continue;
@@ -843,7 +888,15 @@ Report scan_threads(
     } catch (const std::exception &) {
       continue;  // a thread that ended between the readdir and the read is not a finding
     }
-    if (st.policy != SCHED_FIFO && st.policy != SCHED_RR) continue;
+    const std::string comm =
+      host::trimmed(host::Fs{}.read(task_dir + "/" + e->d_name + "/comm").value_or(""));
+    if (comm.rfind("iou-sqp-", 0) == 0 || comm.rfind("iou-wrk-", 0) == 0) {
+      uring.push_back(comm + " (tid " + std::to_string(tid) + ", cpus " + cpu_list(st.cpus) + ")");
+    }
+    if (st.policy != SCHED_FIFO && st.policy != SCHED_RR) {
+      fair.emplace_back(tid, st);
+      continue;
+    }
     const auto & stages = spec.stages();
     if (std::any_of(stages.begin(), stages.end(), [&](const Stage & s) {
           return explains(s, st, tid, held_by);
@@ -864,6 +917,16 @@ Report scan_threads(
       rep, "undeclared-rt-thread", Verdict::Ok,
       "every RT thread holds a stage or is a child a stage lets inherit");
   }
+  if (uring.empty()) {
+    add(rep, "io-uring", Verdict::Ok, "no io_uring helper thread");
+  } else {
+    add(
+      rep, "io-uring", Verdict::Warn,
+      "io_uring helper threads: " + host::list_some(uring, 3) +
+        ". io-wq workers run SCHED_OTHER, and an SQPOLL thread without SQ_AFF inherits its "
+        "creator's cpus, an isolated one included");
+  }
+  shared_stage_cpus(rep, spec, held_by, fair);
   return rep;
 }
 

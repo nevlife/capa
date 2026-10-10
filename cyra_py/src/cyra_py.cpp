@@ -7,6 +7,7 @@
 #include "cyra/spec.hpp"
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/chrono.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -148,7 +149,10 @@ NB_MODULE(_cyra, m)
     .def("find", &cyra::Spec::find, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
     .def("external", &cyra::Spec::external, nb::rv_policy::reference_internal);
 
-  m.def("preflight", &cyra::preflight, "opts"_a, "control_priority"_a = 0);
+  m.def(
+    "preflight", nb::overload_cast<const cyra::Options &, int>(&cyra::preflight), "opts"_a,
+    "control_priority"_a = 0);
+  m.def("preflight", nb::overload_cast<const cyra::Spec &>(&cyra::preflight), "spec"_a);
   m.def(
     "apply_checked",
     nb::overload_cast<const cyra::Options &, cyra::Strictness, int>(&cyra::apply_checked), "opts"_a,
@@ -158,7 +162,9 @@ NB_MODULE(_cyra, m)
   m.def("current", &cyra::current);
   m.def("this_tid", &cyra::this_tid, "The kernel tid; threading.get_ident() is not this number.");
   m.def("observe", &cyra::observe, "tid"_a);
-  m.def("verify", &cyra::verify, "stage"_a, "tid"_a);
+  m.def(
+    "verify", &cyra::verify, "stage"_a, "tid"_a, "window"_a = std::chrono::milliseconds{0},
+    nb::call_guard<nb::gil_scoped_release>());
   m.def("verify_process", nb::overload_cast<const cyra::Spec &>(&cyra::verify_process), "spec"_a);
   m.def(
     "verify_process", nb::overload_cast<const cyra::Spec &, int>(&cyra::verify_process), "spec"_a,

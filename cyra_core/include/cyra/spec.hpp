@@ -3,6 +3,8 @@
 
 #include "cyra/rt.hpp"
 
+#include <chrono>
+#include <cstddef>
 #include <exception>
 #include <future>
 #include <string>
@@ -44,11 +46,15 @@ struct Stage
   std::string chain;  // which chain declared this, for error messages
 };
 
+class Spec;
+
 namespace detail
 {
 // How messages spell a stage: `node`, `node/group`, or `name`.
 std::string stage_name(const Stage & stage);
 void reject_external(const Stage & stage, const char * caller);
+// Each chain's stages, as indices into stages(), in flow order.
+const std::vector<std::vector<std::size_t>> & chains(const Spec & spec);
 }  // namespace detail
 
 class Spec
@@ -70,7 +76,9 @@ public:
   std::vector<const Stage *> external() const;
 
 private:
+  friend const std::vector<std::vector<std::size_t>> & detail::chains(const Spec & spec);
   std::vector<Stage> stages_;
+  std::vector<std::vector<std::size_t>> chains_;
 };
 
 // Takes the stage whole: unpacking it into Options would drop the chain's strictness.
@@ -102,8 +110,13 @@ std::thread spawn(const std::string & target, const std::string & group, F && fn
   return t;
 }
 
-// The caller resolves `tid`: nothing in the file maps a stage to a kernel thread.
-Report verify(const Stage & stage, int tid);
+// Findings about the host as the whole file uses it: what no single stage's preflight can see.
+Report preflight(const Spec & spec);
+
+// The caller resolves `tid`: nothing in the file maps a stage to a kernel thread. A nonzero
+// `window` also reads the thread's and its cpus' counters twice, `window` apart, and judges the
+// difference.
+Report verify(const Stage & stage, int tid, std::chrono::milliseconds window = {});
 
 Report verify_process(const Spec & spec);
 
@@ -134,6 +147,9 @@ struct HeldStage
   std::vector<std::pair<int, std::uint64_t>> earlier;
 };
 std::vector<HeldStage> held_stages();
+
+// preflight(spec) with every /proc and /sys path read under `root`, for tests on host snapshots.
+Report preflight_at(const std::string & root, const Spec & spec);
 
 // CYRA_DAEMON_DIR (default /run/cyra), created if missing. Throws std::runtime_error when it is
 // not this user's or others can write it.

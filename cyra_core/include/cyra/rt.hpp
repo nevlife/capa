@@ -93,6 +93,8 @@ namespace detail
 // The daemon's, on thread `tid`: memory-lock is judged on its process; read-back is observe().
 Report preflight_to(int tid, const Options & opts, int control_priority);
 Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
+// preflight_to with every /proc and /sys path read under `root`, for tests on host snapshots.
+Report preflight_at(const std::string & root, int tid, const Options & opts, int control_priority);
 }  // namespace detail
 
 }  // namespace cyra

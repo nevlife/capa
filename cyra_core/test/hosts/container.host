@@ -1,0 +1,121 @@
+=== /proc/version
+Linux version 6.8.0-1015-aws (buildd@lcy02-amd64-031) (x86_64-linux-gnu-gcc-12 (Ubuntu 12.3.0-1ubuntu1~22.04) 12.3.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #16~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon Aug 19 19:38:17 UTC 2024
+=== /proc/cmdline
+BOOT_IMAGE=/boot/vmlinuz-6.8.0-1015-aws root=PARTUUID=0 ro console=tty1 console=ttyS0 nvme_core.io_timeout=4294967295 audit=1
+=== /proc/consoles
+ttyS0                -W- (EC p a)    4:64
+=== /proc/cpuinfo
+flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm
+=== /proc/meminfo
+MemTotal:       65023392 kB
+=== /proc/self/status
+Name:	cat
+Tgid:	17
+Pid:	17
+CapEff:	00000000a80425fb
+Seccomp:	2
+Seccomp_filters:	1
+VmSize:	    5304 kB
+VmLck:	       0 kB
+Cpus_allowed_list:	0-3
+=== /proc/self/limits
+Limit                     Soft Limit           Hard Limit           Units
+Max realtime priority     0                    0
+=== /proc/self/cgroup
+0::/
+=== /proc/self/mountinfo
+610 600 0:62 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
+=== /proc/self/attr/current
+docker-default (enforce)
+=== /proc/sys/kernel/sched_rt_runtime_us
+950000
+=== /proc/sys/kernel/sched_rt_period_us
+1000000
+=== /proc/sys/kernel/watchdog
+1
+=== /proc/sys/kernel/soft_watchdog
+1
+=== /proc/sys/kernel/watchdog_cpumask
+0-15
+=== /proc/sys/kernel/numa_balancing
+1
+=== /proc/sys/kernel/printk
+4	4	1	7
+=== /proc/sys/kernel/tainted
+0
+=== /proc/sys/vm/compact_unevictable_allowed
+1
+=== /proc/sys/vm/dirty_ratio
+20
+=== /proc/sys/vm/dirty_bytes
+0
+=== /proc/sys/vm/dirty_background_bytes
+0
+=== /proc/irq/default_smp_affinity
+ffff
+=== /proc/1/task/1/stat
+1 (sleep) S 2 0 0 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 100 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+=== /proc/1/task/1/status
+Name:	sleep
+Tgid:	1
+Pid:	1
+VmSize:	   10000 kB
+Cpus_allowed_list:	0-3
+=== /sys/devices/system/cpu/online
+0-15
+=== /sys/devices/system/cpu/isolated
+
+=== /sys/devices/system/cpu/nohz_full
+(null)
+=== /sys/devices/system/cpu/cpu0/topology/thread_siblings_list
+0
+=== /sys/devices/system/cpu/cpu1/topology/thread_siblings_list
+1
+=== /sys/devices/system/cpu/cpu2/topology/thread_siblings_list
+2
+=== /sys/devices/system/cpu/cpu3/topology/thread_siblings_list
+3
+=== /sys/devices/system/cpu/cpu4/topology/thread_siblings_list
+4
+=== /sys/devices/system/cpu/cpu5/topology/thread_siblings_list
+5
+=== /sys/devices/system/cpu/cpu6/topology/thread_siblings_list
+6
+=== /sys/devices/system/cpu/cpu7/topology/thread_siblings_list
+7
+=== /sys/devices/system/cpu/cpu8/topology/thread_siblings_list
+8
+=== /sys/devices/system/cpu/cpu9/topology/thread_siblings_list
+9
+=== /sys/devices/system/cpu/cpu10/topology/thread_siblings_list
+10
+=== /sys/devices/system/cpu/cpu11/topology/thread_siblings_list
+11
+=== /sys/devices/system/cpu/cpu12/topology/thread_siblings_list
+12
+=== /sys/devices/system/cpu/cpu13/topology/thread_siblings_list
+13
+=== /sys/devices/system/cpu/cpu14/topology/thread_siblings_list
+14
+=== /sys/devices/system/cpu/cpu15/topology/thread_siblings_list
+15
+=== /sys/devices/system/node/online
+0-1
+=== /sys/devices/system/clocksource/clocksource0/current_clocksource
+kvm-clock
+=== /sys/devices/virtual/workqueue/cpumask
+ffff
+=== /sys/kernel/mm/transparent_hugepage/enabled
+[always] madvise never
+=== /sys/kernel/mm/transparent_hugepage/defrag
+always defer defer+madvise [madvise] never
+=== /sys/kernel/mm/transparent_hugepage/khugepaged/defrag
+1
+=== /sys/fs/cgroup/cpuset.cpus.effective
+0-3
+=== /sys/fs/cgroup/cpu.max
+200000 100000
+=== /sys/fs/cgroup/memory.high
+8589934592
+=== /sys/fs/cgroup/memory.max
+17179869184

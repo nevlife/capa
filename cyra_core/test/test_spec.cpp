@@ -1,8 +1,11 @@
 #include "cyra/spec.hpp"
 
 #include <gtest/gtest.h>
+#include <pthread.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -10,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 // The chain declaration file. Every rule here exists because a node declaring
 // its own priority in isolation cannot check it: the ordering spans processes, and so does the
@@ -916,4 +920,73 @@ TEST(Bind, AMatchedStageIsRefused)
   std::thread t(
     [&] { EXPECT_THROW(cyra::apply_checked(spec.stage("rx")), std::invalid_argument); });
   t.join();
+}
+
+TEST(Verify, AWindowReadsTheThreadsAndItsCpusCounters)
+{
+  const SpecFile file(R"(
+chains:
+  a:
+    target: soft
+    stages:
+      - {name: toucher, policy: other}
+)");
+  const cyra::Stage stage = cyra::Spec::load(file.path()).stage("toucher");
+  std::promise<int> tid;
+  std::atomic<bool> stop{false};
+  std::thread t([&] {
+    tid.set_value(cyra::this_tid());
+    while (!stop) {
+      std::vector<char> fresh(1 << 20);
+      for (std::size_t i = 0; i < fresh.size(); i += 4096) fresh[i] = 1;
+      std::this_thread::yield();
+    }
+  });
+  const int worker = tid.get_future().get();
+
+  const auto now = cyra::verify(stage, worker);
+  EXPECT_EQ(now.find("thread-faults"), nullptr) << "counters need a window";
+  ASSERT_NE(now.find("pi-boosted"), nullptr);
+  EXPECT_EQ(now.find("pi-boosted")->verdict, cyra::Verdict::Ok);
+  ASSERT_NE(now.find("timerslack"), nullptr) << "another thread's needs CAP_SYS_NICE, so Unknown";
+
+  const auto window = cyra::verify(stage, worker, std::chrono::milliseconds(200));
+  stop = true;
+  t.join();
+  for (const char * id :
+       {"thread-faults", "thread-migrations", "thread-preemptions", "cpu-interrupts",
+        "cpu-softirqs", "cgroup-throttle"}) {
+    EXPECT_NE(window.find(id), nullptr) << id << "\n" << window.to_string();
+  }
+  const auto * faults = window.find("thread-faults");
+  ASSERT_NE(faults, nullptr);
+  EXPECT_EQ(faults->detail.rfind("0 minor", 0), std::string::npos)
+    << "the worker faulted in fresh pages throughout the window: " << faults->detail;
+}
+
+TEST(VerifyProcess, NamesIoUringHelperThreads)
+{
+  const SpecFile file(R"(
+chains:
+  a:
+    target: soft
+    stages:
+      - {name: plain, policy: other}
+)");
+  const cyra::Spec spec = cyra::Spec::load(file.path());
+  EXPECT_EQ(cyra::verify_process(spec).find("io-uring")->verdict, cyra::Verdict::Ok);
+
+  std::promise<void> named;
+  std::promise<void> done;
+  std::thread t([&] {
+    ::pthread_setname_np(::pthread_self(), "iou-wrk-1");
+    named.set_value();
+    done.get_future().wait();
+  });
+  named.get_future().wait();
+  const auto rep = cyra::verify_process(spec);
+  done.set_value();
+  t.join();
+  ASSERT_NE(rep.find("io-uring"), nullptr);
+  EXPECT_EQ(rep.find("io-uring")->verdict, cyra::Verdict::Warn);
 }

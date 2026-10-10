@@ -48,6 +48,9 @@ if(CYRA_FUZZER)
 endif()
 
 add_library(cyra_core
+  src/counters.cpp
+  src/host.cpp
+  src/preflight.cpp
   src/record.cpp
   src/rt.cpp
   src/spec.cpp)
@@ -65,6 +68,7 @@ target_compile_options(cyra_core PRIVATE -Wall -Wextra -Wpedantic)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 set(cyra_core_test_srcs
+  test/test_hosts.cpp
   test/test_record.cpp
   test/test_rt.cpp
   test/test_spec.cpp)
@@ -104,7 +108,9 @@ if(ament_cmake_FOUND)
       ENV CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR} CYRA_DAEMON_DIR=${CYRA_TEST_DAEMON_DIR})
     if(TARGET test_cyra_core)
       target_link_libraries(test_cyra_core cyra_core Threads::Threads)
-      target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
+      target_compile_definitions(test_cyra_core PRIVATE
+        CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs"
+        CYRA_HOSTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/hosts")
     endif()
     if(NOT CYRA_FUZZER)
       add_test(NAME fuzz_spec_corpus COMMAND fuzz_spec)
@@ -141,7 +147,9 @@ else()
     find_package(GTest REQUIRED)
     add_executable(test_cyra_core ${cyra_core_test_srcs})
     target_link_libraries(test_cyra_core PRIVATE cyra_core GTest::gtest GTest::gtest_main Threads::Threads)
-    target_compile_definitions(test_cyra_core PRIVATE CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs")
+    target_compile_definitions(test_cyra_core PRIVATE
+      CYRA_DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs"
+      CYRA_HOSTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/hosts")
     add_test(NAME test_cyra_core COMMAND test_cyra_core)
     set_tests_properties(test_cyra_core PROPERTIES ENVIRONMENT
       "CYRA_RUN_DIR=${CYRA_TEST_RUN_DIR};CYRA_DAEMON_DIR=${CYRA_TEST_DAEMON_DIR}")
