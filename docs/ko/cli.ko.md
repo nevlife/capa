@@ -7,7 +7,7 @@
 | 종료 코드 | 뜻 |
 | --- | --- |
 | 0 | 거절될 stage가 없다(`check`). 실패가 없다(`status`) |
-| 1 | 파일이 규칙을 어겼다. 거절될 stage가 있다(`check`). 실패가 있다(`status`) |
+| 1 | 파일이 규칙을 어겼다. 거절될 stage가 있거나 파일 전체가 이 호스트에서 실패한다(`check`). 실패가 있다(`status`) |
 | 2 | 인자 오류, 또는 파일 미지정 |
 
 요약에는 `ok`, `warn`, `FAIL`만 나온다. `Unknown` finding(읽지 못한 소스, 파일이 주장하지 않는 항목)은 요약에서 뺀다. `-v`가 finding을 전부 보여 준다.
@@ -27,7 +27,9 @@ STAGE              CHAIN      SCHEDULING      HOST            FINDINGS
 
 `refused`는 `apply_checked`가 할 일이다. `Fail`이거나, hard 체인의 `Warn`인 경우다. 권한(`policy-permission`)은 `check`를 돌린 셸 기준이다. bind하는 프로세스는 한도가 다를 수 있다.
 
-## `cyra status [FILE] [-v]`
+표 아래 "the file on this host"에는 `preflight(spec)`의 Warn과 Fail finding이 나온다. stage 하나로는 보이지 않는 것들이다. stage보다 위에 있는 선언되지 않은 RT 스레드, stage CPU의 SCHED_DEADLINE 태스크, housekeeping에 남는 CPU가 없는 경우가 그렇다. 여기서 Fail이 나오면 `check`는 1로 끝난다.
+
+## `cyra status [FILE] [-v] [-w SEC]`
 
 파일의 stage마다 한 줄, 그리고 파일에 없는데 쥐어진 stage마다 한 줄이 나온다.
 
@@ -51,4 +53,8 @@ STAGE        PID      TID      STATE     DETAIL
 
 데몬 `cyrad`가 건 stage는 cyrad가 건 스레드의 pid와 tid로 나온다(`docs/ko/daemon.ko.md`).
 
-표 아래에는 stage를 쥔 프로세스마다 `verify_process`를 돌린 결과가 나온다. stage를 쥐지 않았고 inherit stage의 자식도 아닌 RT 스레드가 목록에 나온다.
+표 아래에는 stage를 쥔 프로세스마다 `verify_process`를 돌린 결과가 나온다. stage를 쥐지 않았고 inherit stage의 자식도 아닌 RT 스레드가 목록에 나오고, io_uring 도우미 스레드와 hard stage의 CPU에 남은 reset 자식도 나온다.
+
+그다음 "the host now, for the stage cpus"에는 `preflight(spec)`와, CPU를 고정한 stage마다 `preflight`의 호스트 finding을 지금 다시 읽은 결과가 나온다. preflight는 stage를 bind할 때 한 번 돌았고, 그 뒤 irqbalance, 전력 데몬, CPU offline이 호스트를 바꿀 수 있다. `status`를 돌린 셸에 관한 finding(권한, 메모리, cgroup, 링크)은 뺀다. 여기서 Fail이 나오면 `status`는 1로 끝난다.
+
+`-w SEC`를 주면 `verify`가 쥔 스레드의 카운터와 그 CPU의 인터럽트, softirq를 SEC 간격으로 두 번 읽는다(`api.ko.md` 4절). 쥔 스레드마다 자기 window를 차례로 쓴다.

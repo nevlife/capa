@@ -2,6 +2,7 @@
 #include "cyra/spec.hpp"
 #include "flux/ros/partitioned_executor.hpp"
 
+#include <chrono>
 #include <string>
 
 // Compiled, never run. The C++ fences of docs/*/api.*.md are the [doc:] regions below, and
@@ -32,12 +33,16 @@ void doc_check(const cyra::Spec & spec, const cyra::Stage & stage, const cyra::O
   cyra::ThreadState other = cyra::observe(tid);                     // any thread, any process
   cyra::Report drift = cyra::verify(stage, tid);                    // a thread against its stage
   cyra::Report stray = cyra::verify_process(spec);                  // RT threads nothing explains
+  cyra::Report whole = cyra::preflight(spec);                       // the whole file on this host
+  cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // and its counters
   // [doc:/check]
   (void)host;
   (void)self;
   (void)other;
   (void)drift;
   (void)stray;
+  (void)whole;
+  (void)spent;
 }
 
 void doc_flux(

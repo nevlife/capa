@@ -17,7 +17,7 @@ cyra::flux::bind(ex, *node, group, "grab");              // a flux or flux2 Part
 | `cyra_daemon` | `cyrad` (Rust, on `cyra_core` through a cxx bridge): sets the threads a file matches by name (interrupt, DDS, SDK threads) and moves reset children ([`docs/en/daemon.en.md`](docs/en/daemon.en.md)) |
 | `cyra_example` | `preflight` and `chain`, C++ only |
 
-The API is in [`docs/en/api.en.md`](docs/en/api.en.md) ([Korean](docs/ko/api.ko.md)).
+The API is in [`docs/en/api.en.md`](docs/en/api.en.md) ([Korean](docs/ko/api.ko.md)). Measuring latency on a host is [`docs/en/latency.en.md`](docs/en/latency.en.md).
 
 ## Build
 
@@ -45,6 +45,8 @@ colcon test
 | YAML | | yamllint |
 
 Across the tree: every public name is in both user documents (`scripts/check_api_docs.py`), the contract tables name tests that exist (`scripts/check_contracts.py`), and document fences equal the compiled example regions (`scripts/check_doc_examples.py`).
+
+Preflight's judgments are tested on host snapshots in `cyra_core/test/hosts`: one captured from an x86 desktop, and written ones for Orin on JetPack 6, a container, and an RT kernel read as root. `capture.sh` there prints a snapshot of the running host, read-only.
 
 `colcon test` also runs: C++ and Python names match (`test_surface.py`), the tracked stub matches the binding (`test_stub.py`), the yaml fences of the documents load, the fuzz corpus, and the three document checks above. `-DCYRA_SANITIZER=thread` (or `address,undefined`) builds `cyra_core` with a sanitizer.
 

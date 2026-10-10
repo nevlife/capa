@@ -148,24 +148,65 @@ int tid = cyra::this_tid();                                        // the kernel
 cyra::ThreadState other = cyra::observe(tid);                      // any thread, any process
 cyra::Report drift = cyra::verify(stage, tid);                     // a thread against its stage
 cyra::Report stray = cyra::verify_process(spec);                   // RT threads nothing explains
+cyra::Report whole = cyra::preflight(spec);                        // the whole file on this host
+cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // and its counters
 ```
 
 A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`, and `detail`. `Verdict` is `Ok`, `Warn`, `Fail`, or `Unknown`, and `Unknown` means the source could not be read, not a pass. `ok()` is "no `Fail`". `find(id)` returns one finding or null. `to_string()` is for people to read, not to parse.
 
-`preflight` findings:
+`preflight` findings. Which run depends on the request: the first group needs an RT policy, the second needs `cpus`, the third always runs, and the last is about the thread's process and is left out for a kernel thread. A source that cannot be read (root-only debugfs, lockdown, another user's process) gives Unknown, never Fail.
 
 | id | Source | Fail / Warn |
 | --- | --- | --- |
-| `policy-permission` | `CapEff` (CAP_SYS_NICE) and `RLIMIT_RTPRIO` | Fail: no permission |
-| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us` | Warn: the throttle takes the cpu from a busy RT thread regardless of priority |
+| `policy-permission` | `CapEff` (CAP_SYS_NICE) and `RLIMIT_RTPRIO` in `/proc/self/limits` | Fail: no permission. The detail names seccomp, the LSM label and `hidepid` when one is set |
+| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us`, debugfs `sched/fair_server/cpuN` (6.12+) | Warn: the throttle, or the fair deadline server, takes the cpu from a busy RT thread regardless of priority. Unknown at `-1` on 6.12+ when the fair server cannot be read |
 | `priority-order` | `opts.priority` against `control_priority` | Fail: at or above the control loop. Unknown when `control_priority` is 0 |
+| `priority-band` | `opts.priority` | Warn: 99, where the kernel's stopper and watchdog work runs (section 10) |
 | `cpu-online` | `/sys/devices/system/cpu/online` | Fail: the cpu does not exist |
-| `cpu-isolation` | `/sys/devices/system/cpu/isolated`, `nohz_full` | Warn: the cpu is shared with other tasks |
+| `cpu-isolation` | `/sys/devices/system/cpu/isolated`, root `cpuset.cpus.isolated`, `nohz_full` | Warn: the cpu is shared with other tasks |
+| `cpuset` | `cpuset.cpus.effective` of the process's cgroup, `cpuset.cpus.partition` up to the root | Fail: a cpu outside the cpuset (a container, systemd `AllowedCPUs`). Warn: an invalid partition. Unknown without cgroup v2 (JetPack 5) |
+| `cpu-governor` | `cpufreq/scaling_governor` | Warn: frequency ramp adds wakeup latency |
+| `cpufreq` | `scaling_driver`, `energy_performance_preference`, `scaling_min_freq`, `related_cpus`, `cpuinfo_transition_latency`, boost | Warn: EPP is not `performance`; in active intel_pstate or amd-pstate mode it decides, not the governor |
 | `rcu-offload` | `rcu_nocbs` in `/proc/cmdline`, `nohz_full` | Warn: deferred kernel frees run on the RT cpu |
 | `irq-affinity` | `/proc/irq/*/effective_affinity_list` | Warn: interrupt handlers preempt every task on the cpu |
-| `cpu-governor` | `cpufreq/scaling_governor` | Warn: frequency ramp adds wakeup latency |
+| `irq-managed` | debugfs `irq/irqs/N` | Warn: a managed interrupt lands there and cannot be moved (`isolcpus=managed_irq`) |
+| `irq-default-affinity` | `/proc/irq/default_smp_affinity` | Warn: an interrupt set up later (a hotplugged camera) starts there |
+| `irqbalance` | a running `irqbalance` | Warn: it rewrites interrupt affinity about every 10 s |
+| `cpu-idle` | `cpuidle/stateN/{latency,disable}`, `power/pm_qos_resume_latency_us` | Warn: an allowed idle state exits slower than 50 us |
+| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | Warn: unbound kernel work runs there |
+| `kthread-affinity` | kernel threads allowed on more than one cpu | Warn: one may run there |
+| `smt` | `topology/thread_siblings_list` | Warn: an SMT sibling is not isolated |
+| `cpu-capacity` | `cpu_capacity` | Warn: a lower-capacity core (an efficiency core) |
+| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | Warn: the 4 s softlockup timer runs there |
 | `kernel-preemption` | `/sys/kernel/realtime`, `/proc/version` | Warn: not PREEMPT_RT |
-| `memory-lock` | `VmLck` in `/proc/self/status` | Warn: no locked memory; a page fault is an unbounded stall |
+| `preempt-mode` | `/proc/version`, debugfs `sched/preempt` | Warn: `none` or `voluntary`, and `lazy` for a stage that is not RT. Unknown when debugfs cannot be read |
+| `sched-ext` | `/sys/kernel/sched_ext/state` | Warn: a BPF scheduler runs this stage or its reset children |
+| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: `always` |
+| `compaction` | `vm.compact_unevictable_allowed` | Warn: 1, so compaction moves mlocked pages |
+| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Warn: on, with two or more nodes |
+| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Warn: ratio limits; a writer past them sleeps |
+| `audit` | `audit=` on the boot line, `auditd` | Warn: audit is on. Unknown when neither says |
+| `console` | `/proc/consoles`, `kernel.printk` | Warn: a serial console on a kernel that is not PREEMPT_RT |
+| `clocksource` | `current_clocksource` | Warn: not `tsc`, `arch_sys_counter` or `kvm-clock`, so `clock_gettime` leaves the vDSO |
+| `virtualization` | the `hypervisor` cpu flag, `/sys/hypervisor` | Warn: a virtual machine; its latency says nothing about bare metal |
+| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Warn: something can change clocks or online cpus after preflight |
+| `memory-lock` | `VmLck` in `/proc/<pid>/status` | Warn: no locked memory; a page fault is an unbounded stall |
+| `cgroup-cpu` | `cpu.max` up the cgroup | Warn: a quota while SCHED_OTHER threads (the stage, or its reset children) run there |
+| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Warn: `memory.high` is set, or oomd runs |
+| `secure-exec` | `AT_SECURE` in `/proc/<pid>/auxv` | Warn: ld.so dropped `LD_PRELOAD` (section 10) |
+| `bind-now` | `LD_BIND_NOW` in the environment, `BIND_NOW` of every mapped object | Warn: an object binds lazily (section 10) |
+
+`preflight(spec)` judges what no single stage can see: the file as a whole on this host. It runs nothing at bind; `cyra check` and `cyra status` print it.
+
+| id | Fail / Warn |
+| --- | --- |
+| `housekeeping` | Fail: isolated cpus and the cpus of hard RT workers cover every online cpu |
+| `foreign-rt-thread` | Warn, per stage: a SCHED_FIFO or SCHED_RR thread the file does not declare may run on the stage's cpus at or above its priority. Kernel and interrupt threads count; `migration/N` does not. Declared means it holds a stage, a `match` names it, it runs at an external stage's `expect_priority`, or it is a child of an inherit stage |
+| `deadline-task` | Warn: a SCHED_DEADLINE task may run on a stage cpu. It runs above every FIFO stage. `sugov:N` is schedutil's |
+| `nohz-single-task` | Warn: two stages on one `nohz_full` cpu, where the tick stops only with one runnable task |
+| `smt-neighbor` | Warn: two hard RT workers on SMT siblings of one core |
+| `llc-handoff` | Ok, for information: adjacent stages of a chain whose cpus share no last-level cache (`cache/index3`, else cpufreq `related_cpus`) |
+| `taint` | Warn: the kernel is tainted W (a warning fired) or L (a soft lockup) |
 
 `verify(stage, tid)` applies nothing. `chrt`, systemd, or a later apply can move a thread after cyra set it; this is how that is seen.
 
@@ -177,9 +218,26 @@ A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`,
 | `observed-children` | The declared `children` against the thread's `SCHED_RESET_ON_FORK` |
 | `observed-cpus` | Ok while the thread's cpus lie within the declared ones |
 
-Items the file does not claim are `Unknown`.
+Items the file does not claim are `Unknown`. Three more findings come from `/proc` at the same time:
 
-`verify_process(spec)` lists every RT thread of this process that no stage explains, one `undeclared-rt-thread` Warn per thread, or one Ok when there is none. A thread is explained when it holds a stage (`bind`, `spawn`, `apply_checked`), or when it runs at the declared scheduling of a stage with `children: inherit`. A thread that merely runs at a stage's values got there without cyra and is listed. It is a Warn, not a Fail: cyra cannot know whether an undeclared thread is a mistake.
+| id | Meaning |
+| --- | --- |
+| `pi-boosted` | Warn: the thread runs boosted, so a higher thread waits on a PI lock it holds. `observed-priority` is judged on the static priority (`sched_getparam`), not the boosted one in `/proc/<tid>/stat` |
+| `signals` | Warn: the thread is RT and SIGINT, SIGTERM or SIGCHLD is caught by the process and not blocked in this thread, so the handler may run on it. Unknown for a thread that is not RT |
+| `timerslack` | Ok with `timerslack_ns`. Unknown unless the reader is the thread itself or has CAP_SYS_NICE |
+
+`verify(stage, tid, window)` with a nonzero `window` also reads counters twice, `window` apart, and judges the difference. It sleeps for `window`.
+
+| id | Source | Warn |
+| --- | --- | --- |
+| `thread-faults` | `minflt`, `majflt` in `/proc/<pid>/task/<tid>/stat` | An RT thread faulted |
+| `thread-migrations` | `se.nr_migrations` in `.../sched` | A stage pinned to one cpu moved |
+| `thread-preemptions` | `nr_involuntary_switches` in `.../sched` | An RT thread was preempted; on its cpu only a declared release stage should |
+| `cpu-interrupts` | `/proc/interrupts`, the stage's cpus | A row other than the tick fired there, or the tick still runs more than 10 times a second on a `nohz_full` cpu (about once a second when it works). Each row names its remedy: a device row its `smp_affinity_list`, RES another task waking there, CAL a function call from another cpu, TLB a mapping change in the process, IWI irq_work |
+| `cpu-softirqs` | `/proc/softirqs`, the stage's cpus | A softirq ran there. RCU wants `rcu_nocbs`, SCHED `isolcpus=domain`, TIMER and HRTIMER `nohz_full`, NET_RX and BLOCK the device's interrupt affinity |
+| `cgroup-throttle` | `cpu.stat` `nr_throttled` and `throttled_usec`, `memory.events` `high`, up the thread's cgroup | The cgroup throttled the thread |
+
+`verify_process(spec)` lists every RT thread of this process that no stage explains, one `undeclared-rt-thread` Warn per thread, or one Ok when there is none. A thread is explained when it holds a stage (`bind`, `spawn`, `apply_checked`), or when it runs at the declared scheduling of a stage with `children: inherit`. A thread that merely runs at a stage's values got there without cyra and is listed. It is a Warn, not a Fail: cyra cannot know whether an undeclared thread is a mistake. It also reports `io-uring`, a Warn for `iou-sqp-*` and `iou-wrk-*` threads (io-wq workers run SCHED_OTHER, and an SQPOLL thread without `IORING_SETUP_SQ_AFF` inherits its creator's cpus, an isolated one included), and `stage-cpu-shared`, a Warn for SCHED_OTHER threads (reset children) left on the cpus of a held hard or `nohz_full` stage that has no `children_cpus`.
 
 ### Other processes
 
@@ -261,8 +319,79 @@ Python is not an RT target. Whatever priority a thread holds, the GIL and GC sta
 - It does not guarantee timing. Memory bandwidth interference, GPU driver ordering, timer phase, and sensor disparity are not solved by priorities. Passing preflight means the host is configured, not that a deadline holds.
 - The library does not set threads it cannot run code on (DDS internals, SDK threads, IRQ threads). The daemon `cyrad` does, for stages with `match`; without it, declare them `external` and `verify` them.
 - It does not derive priorities. You write them; the file rules check them.
-- An RT stage must block regularly. On PREEMPT_RT the per-cpu timer and RCU threads (`ktimers/N`, `rcuc/N`) run at FIFO 1, so a stage that never sleeps starves them on its cpu, and with `sched_rt_runtime_us=-1` nothing takes the cpu back.
+- An RT stage must block regularly. On PREEMPT_RT the per-cpu timer and RCU threads (`ktimers/N`, `rcuc/N`) run at FIFO 1, so a stage that never sleeps starves them on its cpu. `sched_rt_runtime_us=-1` turns the RT throttle off. From 6.12 the fair deadline server still takes up to 50 ms a second from RT tasks for starving SCHED_OTHER threads (`rt-throttle` reports it), but `ktimers` and `rcuc` are FIFO, not SCHED_OTHER, so nothing gives the cpu back to them.
+- It does not measure latency. [`latency.en.md`](latency.en.md) is the recipe.
 
 ## 9. The connection to flux
 
 `cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a flux or flux2 executor, which they take as a template parameter (C++) or any object (Python), linking neither. flux and flux2 know nothing about cyra, and `cyra_core` depends on neither. The hook, the template, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.
+
+## 10. Running RT threads on Linux
+
+The file checks priorities against each other. These rules are about what a priority cannot express; the findings named here are where cyra sees a part of them.
+
+### Waits outside the priority chain
+
+A thread that waits on another inherits that thread's place in the schedule. For a lock, a PI mutex hands the holder the waiter's priority. A wait for another thread to hand work over (a futex word, an eventfd, a condition) holds nothing, so nothing is boosted: the waiter runs no sooner than the thread that releases it. Declare the releasing thread a `release` stage of the chain, RT and above the waiter. Raising its nice value (a `WQ_HIGHPRI` workqueue is nice -20) is not enough: any RT thread on that cpu still runs first.
+
+flux2 has three such threads in a process that uses it, and a GPU adds the driver's interrupt thread.
+
+| Thread | Releases | Declare |
+| --- | --- | --- |
+| `flux2-parker` | The executor wait, when a subscribed input arrives | `match: {process: <comm>, thread: flux2-parker}` |
+| `flux2-gpu-wait` | A loan in Deferred release mode, once its GPU fence signals | `match: {process: <comm>, thread: flux2-gpu-wait}` |
+| `flux2-gpu-fd` | A subscriber's attach to a dGPU publisher (the fd exchange) | Only when attaches happen while the chain runs |
+| The GPU driver's interrupt thread | Every fence wait on that GPU (threaded on PREEMPT_RT or with `threadirqs`) | `match: {irq: <handler>}`, the name in `/sys/kernel/irq/<n>/actions` |
+
+```yaml
+chains:
+  perception:
+    target: hard
+    stages:
+      - name: gpu_irq
+        kind: release
+        policy: fifo
+        priority: 88
+        match: {irq: nvidia}
+      - name: parker
+        kind: release
+        policy: fifo
+        priority: 86
+        match: {process: perception, thread: flux2-parker}
+      - node: /perception_node
+        group: infer
+        policy: fifo
+        priority: 70
+        cpus: [3]
+```
+
+`foreign-rt-thread` lists the RT threads above a stage that the file does not declare. A releasing thread that is not RT never shows there; find it by what the stage waits on.
+
+### Timers on PREEMPT_RT
+
+On PREEMPT_RT a timer expires in one of two contexts. The nanosleep, futex and epoll timeouts of RT and DEADLINE tasks expire in hard interrupt context. SCHED_OTHER timeouts, timerfd, and POSIX timers expire in `ktimers/N`, at FIFO 1. An RT stage that keeps `ktimers` from running on its cpu therefore delays the ROS timers and timerfd loops of SCHED_OTHER executors there. An RT stage waits for its period with `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` or a futex timeout, not a timerfd.
+
+### Priority bands
+
+| Band | For |
+| --- | --- |
+| 99 | The kernel's watchdog and stopper work. No stage (`priority-band` Warns) |
+| 85..94 | Interrupt threads that feed RT stages |
+| 80..89 | The main RT stages |
+| 50..79 | Other interrupt threads (the kernel starts them at 50) |
+
+### `nohz_full`
+
+A `nohz_full` cpu stops its tick only while one task is runnable there. Put one stage on it, and give that stage `children_cpus` so its reset children leave (`nohz-single-task`, `stage-cpu-shared`). A window of `verify` shows whether the tick stopped: about one local timer interrupt a second. On a `nohz_full` cpu the softlockup watchdog is off by default, so a stage that never sleeps there is not reported by the kernel either.
+
+### Permission
+
+Grant RT with `RLIMIT_RTPRIO`: `LimitRTPRIO=` in a systemd unit, or `rtprio` in `limits.conf`. Not with `setcap cap_sys_nice+ep`. A file capability makes `exec` secure-exec, and ld.so then drops `LD_PRELOAD` and `LD_LIBRARY_PATH` without a word, so a preloaded tracer (armo's, lttng-ust's) is gone (`secure-exec`).
+
+### Lazy binding
+
+The first call through each PLT entry runs the dynamic linker, which on an RT path is a stall of up to milliseconds. Set `LD_BIND_NOW=1` for the process, or link with `-z now` (`bind-now`).
+
+### fork
+
+`fork` in a process with RT threads copies its page tables under the mmap_lock and write-protects every private page, so each thread then takes a copy-on-write fault on its next write, locked memory included. Start helper processes before the chain runs, or use `posix_spawn`, which does not copy the address space.

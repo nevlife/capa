@@ -7,7 +7,7 @@ The file is the argument, or `CYRA_SPEC` when none is given.
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Nothing refused (`check`) or nothing failed (`status`) |
-| 1 | The file breaks a rule, a stage would be refused (`check`), or something failed (`status`) |
+| 1 | The file breaks a rule, a stage would be refused or the whole file fails on this host (`check`), or something failed (`status`) |
 | 2 | Bad arguments, or no file named at all |
 
 Summaries show `ok`, `warn`, and `FAIL`. An `Unknown` finding (a source that could not be read, or an item the file claims nothing about) is left out of the summary; `-v` prints every finding.
@@ -27,7 +27,9 @@ STAGE              CHAIN      SCHEDULING      HOST            FINDINGS
 
 `refused` is what `apply_checked` would do: a `Fail`, or a `Warn` on a hard chain. Permission (`policy-permission`) is judged for the shell that runs `check`; the processes that bind may run with other limits.
 
-## `cyra status [FILE] [-v]`
+Below the table, under "the file on this host", come the Warn and Fail findings of `preflight(spec)`: what no single stage shows, such as undeclared RT threads above a stage, SCHED_DEADLINE tasks on stage cpus, or no cpu left for housekeeping. A Fail there ends `check` with 1.
+
+## `cyra status [FILE] [-v] [-w SEC]`
 
 One row per stage of the file, and one per held stage the file does not name.
 
@@ -51,4 +53,8 @@ STAGE        PID      TID      STATE     DETAIL
 
 A stage the daemon `cyrad` set shows with the pid and tid of the thread it set (`docs/en/daemon.en.md`).
 
-Below the table, every process that holds a stage is scanned with `verify_process`: RT threads there that hold no stage and are not an inherit stage's children are listed.
+Below the table, every process that holds a stage is scanned with `verify_process`: RT threads there that hold no stage and are not an inherit stage's children are listed, with io_uring helper threads and reset children left on a hard stage's cpus.
+
+Then comes "the host now, for the stage cpus": `preflight(spec)` and the host findings of each pinned stage's `preflight`, read now. Preflight ran once, when the stage was bound; irqbalance, a power daemon, or a cpu going offline can change the host since. Findings about the shell that runs `status` (its permission, memory, cgroup and linking) are left out. A Fail there ends `status` with 1.
+
+`-w SEC` makes `verify` read each holder's counters and its cpus' interrupts and softirqs twice, SEC apart (`api.en.md` section 4). Each holder takes its own window, one after another.

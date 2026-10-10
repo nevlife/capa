@@ -148,24 +148,65 @@ int tid = cyra::this_tid();                                        // 이 스레
 cyra::ThreadState other = cyra::observe(tid);                      // 아무 스레드, 프로세스 무관
 cyra::Report drift = cyra::verify(stage, tid);                     // 스레드와 stage 대조
 cyra::Report stray = cyra::verify_process(spec);                   // 설명되지 않는 RT 스레드
+cyra::Report whole = cyra::preflight(spec);                        // 파일 전체를 이 호스트에서
+cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카운터까지
 ```
 
 `Report`는 `findings`를 담는다. `Finding`은 `id`(안정 슬러그), `verdict`, `detail`이다. `Verdict`는 `Ok`, `Warn`, `Fail`, `Unknown`이고, `Unknown`은 소스를 읽지 못한 것이지 통과가 아니다. `ok()`는 "`Fail` 없음"이다. `find(id)`는 finding 하나나 null을 준다. `to_string()`은 사람이 읽는 것이고 파싱할 형식이 아니다.
 
-`preflight` finding:
+`preflight` finding. 어느 것이 도는지는 요청에 달렸다. 첫 묶음은 RT 정책이 있을 때, 둘째 묶음은 `cpus`가 있을 때 돌고, 셋째 묶음은 늘 돈다. 마지막 묶음은 스레드가 속한 프로세스에 관한 것이라 커널 스레드에서는 빠진다. 읽을 수 없는 소스(root 전용 debugfs, lockdown, 다른 사용자의 프로세스)는 Unknown이고 Fail이 되지 않는다.
 
 | id | 소스 | Fail / Warn |
 | --- | --- | --- |
-| `policy-permission` | `CapEff`(CAP_SYS_NICE)와 `RLIMIT_RTPRIO` | Fail: 권한이 없다 |
-| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us` | Warn: throttle이 바쁜 RT 스레드의 CPU를 우선순위와 무관하게 뺏는다 |
+| `policy-permission` | `CapEff`(CAP_SYS_NICE)와 `/proc/self/limits`의 `RLIMIT_RTPRIO` | Fail: 권한이 없다. seccomp, LSM 라벨, `hidepid`가 걸려 있으면 detail에 적는다 |
+| `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us`, debugfs `sched/fair_server/cpuN`(6.12+) | Warn: throttle이나 fair deadline server가 바쁜 RT 스레드의 CPU를 우선순위와 무관하게 뺏는다. 6.12+에서 `-1`인데 fair server를 읽지 못하면 Unknown |
 | `priority-order` | `opts.priority`와 `control_priority` | Fail: control loop 이상. `control_priority`가 0이면 Unknown |
+| `priority-band` | `opts.priority` | Warn: 99. 커널의 stopper와 watchdog 작업이 도는 자리다(10절) |
 | `cpu-online` | `/sys/devices/system/cpu/online` | Fail: 없는 CPU |
-| `cpu-isolation` | `/sys/devices/system/cpu/isolated`, `nohz_full` | Warn: 다른 태스크와 CPU를 나눠 쓴다 |
+| `cpu-isolation` | `/sys/devices/system/cpu/isolated`, 루트 `cpuset.cpus.isolated`, `nohz_full` | Warn: 다른 태스크와 CPU를 나눠 쓴다 |
+| `cpuset` | 프로세스 cgroup의 `cpuset.cpus.effective`, 루트까지의 `cpuset.cpus.partition` | Fail: cpuset 밖의 CPU(컨테이너, systemd `AllowedCPUs`). Warn: invalid partition. cgroup v2가 없으면(JetPack 5) Unknown |
+| `cpu-governor` | `cpufreq/scaling_governor` | Warn: 주파수 상승이 wakeup 지연을 늘린다 |
+| `cpufreq` | `scaling_driver`, `energy_performance_preference`, `scaling_min_freq`, `related_cpus`, `cpuinfo_transition_latency`, boost | Warn: EPP가 `performance`가 아니다. active 모드 intel_pstate와 amd-pstate에서는 governor가 아니라 EPP가 정한다 |
 | `rcu-offload` | `/proc/cmdline`의 `rcu_nocbs`, `nohz_full` | Warn: 미뤄둔 커널 해제가 RT CPU에서 돈다 |
 | `irq-affinity` | `/proc/irq/*/effective_affinity_list` | Warn: 인터럽트 핸들러가 그 CPU의 모든 태스크를 선점한다 |
-| `cpu-governor` | `cpufreq/scaling_governor` | Warn: 주파수 상승이 wakeup 지연을 늘린다 |
+| `irq-managed` | debugfs `irq/irqs/N` | Warn: managed 인터럽트가 그 CPU로 오고 옮길 수 없다(`isolcpus=managed_irq`) |
+| `irq-default-affinity` | `/proc/irq/default_smp_affinity` | Warn: 나중에 생기는 인터럽트(핫플러그 카메라)가 그 CPU에서 시작한다 |
+| `irqbalance` | 돌고 있는 `irqbalance` | Warn: 약 10초마다 인터럽트 affinity를 다시 쓴다 |
+| `cpu-idle` | `cpuidle/stateN/{latency,disable}`, `power/pm_qos_resume_latency_us` | Warn: 허용된 idle state의 exit latency가 50 us를 넘는다 |
+| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | Warn: unbound 커널 작업이 그 CPU에서 돈다 |
+| `kthread-affinity` | CPU 둘 이상에 허용된 커널 스레드 | Warn: 그 CPU에서 돌 수 있는 것이 있다 |
+| `smt` | `topology/thread_siblings_list` | Warn: SMT sibling이 격리되지 않았다 |
+| `cpu-capacity` | `cpu_capacity` | Warn: capacity가 낮은 코어(효율 코어) |
+| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | Warn: 4초 softlockup 타이머가 그 CPU에서 돈다 |
 | `kernel-preemption` | `/sys/kernel/realtime`, `/proc/version` | Warn: PREEMPT_RT가 아니다 |
-| `memory-lock` | `/proc/self/status`의 `VmLck` | Warn: 잠긴 메모리가 없다. page fault는 상한 없는 지연이다 |
+| `preempt-mode` | `/proc/version`, debugfs `sched/preempt` | Warn: `none`이나 `voluntary`, 그리고 RT가 아닌 stage의 `lazy`. debugfs를 읽지 못하면 Unknown |
+| `sched-ext` | `/sys/kernel/sched_ext/state` | Warn: BPF 스케줄러가 이 stage나 그 reset 자식을 맡는다 |
+| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: `always` |
+| `compaction` | `vm.compact_unevictable_allowed` | Warn: 1이라 compaction이 mlock된 페이지를 옮긴다 |
+| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Warn: 노드가 둘 이상인데 켜져 있다 |
+| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Warn: 비율 한도다. 한도를 넘겨 쓰는 스레드는 잠든다 |
+| `audit` | 부트 라인의 `audit=`, `auditd` | Warn: audit가 켜져 있다. 둘 다 말이 없으면 Unknown |
+| `console` | `/proc/consoles`, `kernel.printk` | Warn: PREEMPT_RT가 아닌 커널에 시리얼 콘솔이 있다 |
+| `clocksource` | `current_clocksource` | Warn: `tsc`, `arch_sys_counter`, `kvm-clock`가 아니라 `clock_gettime`이 vDSO를 벗어난다 |
+| `virtualization` | CPU의 `hypervisor` 플래그, `/sys/hypervisor` | Warn: 가상 머신이다. 여기서 잰 지연은 실기와 무관하다 |
+| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Warn: preflight 뒤에 클럭이나 online CPU를 바꿀 수 있는 것이 있다 |
+| `memory-lock` | `/proc/<pid>/status`의 `VmLck` | Warn: 잠긴 메모리가 없다. page fault는 상한 없는 지연이다 |
+| `cgroup-cpu` | cgroup을 따라 올라간 `cpu.max` | Warn: quota가 있는데 SCHED_OTHER 스레드(stage 자신이나 reset 자식)가 그 안에서 돈다 |
+| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Warn: `memory.high`가 걸려 있거나 oomd가 돈다 |
+| `secure-exec` | `/proc/<pid>/auxv`의 `AT_SECURE` | Warn: ld.so가 `LD_PRELOAD`를 버렸다(10절) |
+| `bind-now` | 환경의 `LD_BIND_NOW`, 매핑된 모든 객체의 `BIND_NOW` | Warn: lazy binding하는 객체가 있다(10절) |
+
+`preflight(spec)`는 stage 하나로는 보이지 않는 것, 즉 파일 전체를 이 호스트에서 판정한다. bind 때는 돌지 않고 `cyra check`와 `cyra status`가 출력한다.
+
+| id | Fail / Warn |
+| --- | --- |
+| `housekeeping` | Fail: 격리 CPU와 hard RT worker의 CPU가 online CPU를 전부 덮는다 |
+| `foreign-rt-thread` | stage마다 Warn: 파일이 선언하지 않은 SCHED_FIFO나 SCHED_RR 스레드가 stage의 CPU에서 stage 이상의 우선순위로 돌 수 있다. 커널 스레드와 인터럽트 스레드도 센다. `migration/N`은 세지 않는다. 선언됐다는 것은 stage를 쥐었거나, `match`가 가리키거나, external stage의 `expect_priority`로 돌거나, inherit stage의 자식이라는 뜻이다 |
+| `deadline-task` | Warn: SCHED_DEADLINE 태스크가 stage CPU에서 돌 수 있다. 모든 FIFO stage보다 위에서 돈다. `sugov:N`은 schedutil의 것이다 |
+| `nohz-single-task` | Warn: `nohz_full` CPU 하나에 stage가 둘이다. tick은 실행 가능한 태스크가 하나일 때만 멈춘다 |
+| `smt-neighbor` | Warn: hard RT worker 둘이 한 코어의 SMT sibling에 있다 |
+| `llc-handoff` | Ok, 참고용: 체인에서 이웃한 stage의 CPU가 last-level cache를 나누지 않는다(`cache/index3`, 없으면 cpufreq `related_cpus`) |
+| `taint` | Warn: 커널이 W(경고 발생)나 L(soft lockup)로 tainted다 |
 
 `verify(stage, tid)`는 아무것도 걸지 않는다. cyra가 건 뒤 `chrt`, systemd, 다른 코드가 스레드를 옮길 수 있고, 그것을 여기서 본다.
 
@@ -177,9 +218,26 @@ cyra::Report stray = cyra::verify_process(spec);                   // 설명되�
 | `observed-children` | 선언한 `children`과 스레드의 `SCHED_RESET_ON_FORK` |
 | `observed-cpus` | 스레드의 CPU가 선언한 CPU 안에 있으면 Ok |
 
-파일이 주장하지 않는 항목은 `Unknown`이다.
+파일이 주장하지 않는 항목은 `Unknown`이다. 같은 때 `/proc`에서 finding 셋을 더 읽는다.
 
-`verify_process(spec)`는 이 프로세스에서 어떤 stage도 설명하지 못하는 RT 스레드마다 `undeclared-rt-thread` Warn을 하나씩 내고, 없으면 Ok 하나를 낸다. stage를 쥔 스레드(`bind`, `spawn`, `apply_checked`)는 설명된다. `children: inherit`인 stage의 스케줄로 도는 스레드도 설명된다. stage의 값과 같게 돌기만 하는 스레드는 cyra 밖에서 그렇게 된 것이라 목록에 나온다. Fail이 아니라 Warn인 이유는 선언 안 한 스레드가 잘못인지 cyra가 알 수 없기 때문이다.
+| id | 뜻 |
+| --- | --- |
+| `pi-boosted` | Warn: 스레드가 boost된 채 돈다. 더 높은 스레드가 이 스레드가 쥔 PI lock을 기다린다는 뜻이다. `observed-priority`는 `/proc/<tid>/stat`의 boost된 값이 아니라 정적 우선순위(`sched_getparam`)로 판정한다 |
+| `signals` | Warn: RT 스레드인데 프로세스가 SIGINT, SIGTERM, SIGCHLD를 잡고 이 스레드는 막지 않아, 핸들러가 이 스레드에서 돌 수 있다. RT가 아닌 스레드는 Unknown |
+| `timerslack` | `timerslack_ns`와 함께 Ok. 읽는 쪽이 그 스레드 자신이거나 CAP_SYS_NICE가 있어야 하고, 아니면 Unknown |
+
+`window`가 0이 아닌 `verify(stage, tid, window)`는 카운터를 `window` 간격으로 두 번 읽어 차이를 판정한다. `window`만큼 잔다.
+
+| id | 소스 | Warn |
+| --- | --- | --- |
+| `thread-faults` | `/proc/<pid>/task/<tid>/stat`의 `minflt`, `majflt` | RT 스레드에 fault가 났다 |
+| `thread-migrations` | `.../sched`의 `se.nr_migrations` | CPU 하나에 고정한 stage가 옮겨졌다 |
+| `thread-preemptions` | `.../sched`의 `nr_involuntary_switches` | RT 스레드가 선점됐다. 그 CPU에서 선점할 수 있는 것은 선언된 release stage뿐이어야 한다 |
+| `cpu-interrupts` | `/proc/interrupts`, stage의 CPU | tick이 아닌 행이 그 CPU에서 늘었거나, `nohz_full` CPU에서 tick이 초당 10번 넘게 돈다(멈추면 초당 1번쯤이다). 행마다 처방을 적는다. 장치 행은 그 `smp_affinity_list`, RES는 다른 태스크가 그 CPU에서 깨어나는 것, CAL은 다른 CPU의 function call, TLB는 프로세스의 매핑 변경, IWI는 irq_work다 |
+| `cpu-softirqs` | `/proc/softirqs`, stage의 CPU | softirq가 그 CPU에서 돌았다. RCU는 `rcu_nocbs`, SCHED는 `isolcpus=domain`, TIMER와 HRTIMER는 `nohz_full`, NET_RX와 BLOCK은 장치 인터럽트 affinity로 푼다 |
+| `cgroup-throttle` | 스레드 cgroup을 따라 올라간 `cpu.stat`의 `nr_throttled`, `throttled_usec`, `memory.events`의 `high` | cgroup이 스레드를 묶었다 |
+
+`verify_process(spec)`는 이 프로세스에서 어떤 stage도 설명하지 못하는 RT 스레드마다 `undeclared-rt-thread` Warn을 하나씩 내고, 없으면 Ok 하나를 낸다. stage를 쥔 스레드(`bind`, `spawn`, `apply_checked`)는 설명된다. `children: inherit`인 stage의 스케줄로 도는 스레드도 설명된다. stage의 값과 같게 돌기만 하는 스레드는 cyra 밖에서 그렇게 된 것이라 목록에 나온다. Fail이 아니라 Warn인 이유는 선언 안 한 스레드가 잘못인지 cyra가 알 수 없기 때문이다. `io-uring`도 보고한다. `iou-sqp-*`, `iou-wrk-*` 스레드가 있으면 Warn이다(io-wq 워커는 SCHED_OTHER로 돌고, `IORING_SETUP_SQ_AFF` 없는 SQPOLL 스레드는 만든 스레드의 CPU를 물려받아 격리 CPU에서도 돈다). `stage-cpu-shared`는 `children_cpus` 없는 hard stage나 `nohz_full` stage가 쥐어져 있고, 그 CPU에 SCHED_OTHER 스레드(reset 자식)가 남아 있으면 Warn이다.
 
 ### 다른 프로세스
 
@@ -261,8 +319,79 @@ Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 
 - 타이밍을 보장하지 않는다. 메모리 대역 간섭, GPU 드라이버 순서, 타이머 위상, 센서 간 disparity는 우선순위로 풀리지 않는다. preflight 통과는 호스트 설정이 됐다는 뜻이지 마감을 지킨다는 뜻이 아니다.
 - 라이브러리는 코드를 넣을 수 없는 스레드(DDS 내부, SDK 스레드, IRQ 스레드)를 걸지 않는다. `match`를 적은 stage는 데몬 `cyrad`가 건다. 데몬이 없으면 `external`로 선언하고 `verify`한다.
 - 우선순위를 도출하지 않는다. 사람이 적고 파일 규칙이 검사한다.
-- RT stage는 주기적으로 block해야 한다. PREEMPT_RT에서 CPU별 타이머와 RCU 스레드(`ktimers/N`, `rcuc/N`)는 FIFO 1이라, 잠들지 않는 stage는 그 CPU에서 이들을 굶긴다. `sched_rt_runtime_us=-1`이면 CPU를 되찾아 주는 장치도 없다.
+- RT stage는 주기적으로 block해야 한다. PREEMPT_RT에서 CPU별 타이머와 RCU 스레드(`ktimers/N`, `rcuc/N`)는 FIFO 1이라, 잠들지 않는 stage는 그 CPU에서 이들을 굶긴다. `sched_rt_runtime_us=-1`은 RT throttle을 끈다. 6.12부터는 그래도 fair deadline server가 굶는 SCHED_OTHER 스레드를 위해 RT 태스크에게서 초당 최대 50 ms를 가져간다(`rt-throttle`이 보고한다). 그러나 `ktimers`와 `rcuc`는 SCHED_OTHER가 아니라 FIFO라서, 이들에게 CPU를 되찾아 주는 장치는 없다.
+- 지연을 재지 않는다. 재는 방법은 [`latency.ko.md`](latency.ko.md)에 있다.
 
 ## 9. flux와의 연결
 
 `cyra_flux`와 `cyra.flux`는 flux나 flux2 executor의 `on_thread_start` hook을 등록한다. executor를 템플릿 인자(C++)나 아무 객체(Python)로 받으므로 둘 다 링크하지 않는다. flux와 flux2는 cyra를 모르고 `cyra_core`는 둘 다에 의존하지 않는다. hook, 템플릿, 패키지 구성은 언제든 바뀔 수 있고, `cyra_flux`와 `cyra.flux` 밖의 코드는 여기에 기대지 않는다.
+
+## 10. Linux에서 RT 스레드 돌리기
+
+파일은 우선순위끼리를 검사한다. 아래 규칙은 우선순위로 표현할 수 없는 것에 관한 것이다. 여기 적은 finding이 cyra가 그 일부를 보는 곳이다.
+
+### 우선순위 사슬 밖의 대기
+
+다른 스레드를 기다리는 스레드는 그 스레드의 스케줄 위치를 물려받는다. lock이면 PI mutex가 쥔 쪽에 기다리는 쪽의 우선순위를 준다. 일을 넘겨받는 대기(futex 워드, eventfd, condition)는 쥔 것이 없으니 아무도 boost되지 않는다. 기다리는 쪽은 넘겨주는 스레드보다 먼저 돌 수 없다. 넘겨주는 스레드를 체인의 `release` stage로 선언하고, RT로 기다리는 쪽보다 위에 둔다. nice만 올리는 것(`WQ_HIGHPRI` workqueue는 nice -20)으로는 부족하다. 그 CPU의 RT 스레드가 여전히 먼저 돈다.
+
+flux2를 쓰는 프로세스에는 이런 스레드가 셋 있고, GPU가 있으면 드라이버 인터럽트 스레드가 더해진다.
+
+| 스레드 | 풀어 주는 것 | 선언 |
+| --- | --- | --- |
+| `flux2-parker` | 구독한 입력이 도착했을 때 executor의 대기 | `match: {process: <comm>, thread: flux2-parker}` |
+| `flux2-gpu-wait` | Deferred release 모드에서 GPU fence가 signal된 loan | `match: {process: <comm>, thread: flux2-gpu-wait}` |
+| `flux2-gpu-fd` | dGPU publisher에 대한 subscriber의 attach(fd 교환) | 체인이 도는 동안 attach가 일어날 때만 |
+| GPU 드라이버의 인터럽트 스레드 | 그 GPU의 모든 fence 대기(PREEMPT_RT나 `threadirqs`에서 스레드가 된다) | `match: {irq: <handler>}`, 이름은 `/sys/kernel/irq/<n>/actions`의 것 |
+
+```yaml
+chains:
+  perception:
+    target: hard
+    stages:
+      - name: gpu_irq
+        kind: release
+        policy: fifo
+        priority: 88
+        match: {irq: nvidia}
+      - name: parker
+        kind: release
+        policy: fifo
+        priority: 86
+        match: {process: perception, thread: flux2-parker}
+      - node: /perception_node
+        group: infer
+        policy: fifo
+        priority: 70
+        cpus: [3]
+```
+
+`foreign-rt-thread`는 파일이 선언하지 않았는데 stage보다 위에 있는 RT 스레드를 보여 준다. 넘겨주는 스레드가 RT가 아니면 거기 나오지 않는다. stage가 무엇을 기다리는지에서 찾는다.
+
+### PREEMPT_RT의 타이머
+
+PREEMPT_RT에서 타이머는 두 문맥 중 하나에서 만료된다. RT와 DEADLINE 태스크의 nanosleep, futex, epoll timeout은 hard interrupt 문맥에서 만료된다. SCHED_OTHER의 timeout, timerfd, POSIX timer는 FIFO 1인 `ktimers/N`에서 만료된다. 그래서 RT stage가 자기 CPU에서 `ktimers`를 못 돌게 하면, 그 CPU에 있는 SCHED_OTHER executor의 ROS timer와 timerfd 주기 루프가 늦는다. RT stage의 주기 대기는 timerfd가 아니라 `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)`이나 futex timeout으로 한다.
+
+### 우선순위 대역
+
+| 대역 | 용도 |
+| --- | --- |
+| 99 | 커널의 watchdog과 stopper 작업. stage는 두지 않는다(`priority-band` Warn) |
+| 85..94 | RT stage를 먹이는 인터럽트 스레드 |
+| 80..89 | 주 RT stage |
+| 50..79 | 그 밖의 인터럽트 스레드(커널은 50으로 시작한다) |
+
+### `nohz_full`
+
+`nohz_full` CPU는 실행 가능한 태스크가 하나일 때만 tick을 멈춘다. stage는 하나만 두고, 그 stage에 `children_cpus`를 줘서 reset 자식이 떠나게 한다(`nohz-single-task`, `stage-cpu-shared`). tick이 멈췄는지는 `verify`의 window로 본다. 멈췄으면 local timer 인터럽트가 초당 1번쯤이다. `nohz_full` CPU에서는 softlockup watchdog이 기본으로 꺼져 있어, 거기서 잠들지 않는 stage는 커널도 보고하지 않는다.
+
+### 권한
+
+RT 권한은 `RLIMIT_RTPRIO`로 준다. systemd 유닛의 `LimitRTPRIO=`나 `limits.conf`의 `rtprio`다. `setcap cap_sys_nice+ep`로 주지 않는다. file capability가 붙은 `exec`는 secure-exec가 되고, 그러면 ld.so가 `LD_PRELOAD`와 `LD_LIBRARY_PATH`를 말없이 버린다. 미리 올린 tracer(armo, lttng-ust)가 빠진다(`secure-exec`).
+
+### lazy binding
+
+PLT 항목마다 첫 호출은 동적 링커를 거친다. RT 경로에서는 최대 수 ms의 정지다. 프로세스에 `LD_BIND_NOW=1`을 주거나 `-z now`로 링크한다(`bind-now`).
+
+### fork
+
+RT 스레드가 있는 프로세스에서 `fork`하면 mmap_lock을 쥔 채 페이지 테이블을 복사하고 private 페이지를 전부 쓰기 금지로 바꾼다. 그 뒤 각 스레드는 다음 쓰기에서 copy-on-write fault를 겪는다. 잠근 메모리도 마찬가지다. 도우미 프로세스는 체인이 돌기 전에 띄우거나, 주소 공간을 복사하지 않는 `posix_spawn`을 쓴다.
