@@ -46,7 +46,7 @@ colcon test
 
 Across the tree: every public name is in both user documents (`scripts/check_api_docs.py`), the contract tables name tests that exist (`scripts/check_contracts.py`), and document fences equal the compiled example regions (`scripts/check_doc_examples.py`).
 
-Preflight's judgments are tested on host snapshots in `cyra_core/test/hosts`: one captured from an x86 desktop, and written ones for Orin on JetPack 6, a container, and an RT kernel read as root. `capture.sh` there prints a snapshot of the running host, read-only.
+Preflight's judgments are tested on hand-written host snapshots in `cyra_core/test/hosts`: a stock x86 desktop, Orin on JetPack 6, a container, and an RT kernel read as root. `capture.sh` there prints the running host's files, read-only, as a reference for writing one; its output identifies the host and is not committed as-is.
 
 `colcon test` also runs: C++ and Python names match (`test_surface.py`), the tracked stub matches the binding (`test_stub.py`), the yaml fences of the documents load, the fuzz corpus, and the three document checks above. `-DCYRA_SANITIZER=thread` (or `address,undefined`) builds `cyra_core` with a sanitizer.
 

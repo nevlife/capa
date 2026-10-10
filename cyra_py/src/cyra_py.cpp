@@ -71,7 +71,8 @@ NB_MODULE(_cyra, m)
     .value("Ok", cyra::Verdict::Ok)
     .value("Warn", cyra::Verdict::Warn)
     .value("Fail", cyra::Verdict::Fail)
-    .value("Unknown", cyra::Verdict::Unknown);
+    .value("Unknown", cyra::Verdict::Unknown)
+    .value("Info", cyra::Verdict::Info);
 
   nb::enum_<cyra::Kind>(m, "Kind")
     .value("Worker", cyra::Kind::Worker)
@@ -150,8 +151,8 @@ NB_MODULE(_cyra, m)
     .def("external", &cyra::Spec::external, nb::rv_policy::reference_internal);
 
   m.def(
-    "preflight", nb::overload_cast<const cyra::Options &, int>(&cyra::preflight), "opts"_a,
-    "control_priority"_a = 0);
+    "preflight", nb::overload_cast<const cyra::Options &, int, cyra::Strictness>(&cyra::preflight),
+    "opts"_a, "control_priority"_a = 0, "strict"_a = cyra::Strictness::Soft);
   m.def("preflight", nb::overload_cast<const cyra::Spec &>(&cyra::preflight), "spec"_a);
   m.def(
     "apply_checked",

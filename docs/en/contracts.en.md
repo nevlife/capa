@@ -31,6 +31,7 @@ A new promise gets a row before it gets a claim in a user document.
 | X-021 | flux bind reaches the group child of a flux2 executor as well | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 | X-022 | preflight of a whole file fails it when its hard stages and the isolated cpus leave no housekeeping cpu | `Hosts.HousekeepingFailsWhenNothingIsLeft` | `test_preflight_of_a_file_fails_a_host_left_without_housekeeping` |
 | X-023 | verify with a window adds the thread's and its cpus' counters, and without one reads none | `Verify.AWindowReadsTheThreadsAndItsCpusCounters` | `test_verify_with_a_window_reads_counters` |
+| X-024 | An Info finding never refuses an apply; on a stock host a hard request is refused only for findings that move latency | `Hosts.AStockHostRefusesAHardChainOnlyForLatencyFindings` | `test_informational_findings_never_block_a_hard_request` |
 
 ## 2. Deliberate differences
 

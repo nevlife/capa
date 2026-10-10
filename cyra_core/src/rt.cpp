@@ -246,7 +246,7 @@ const Finding * Report::find(const char * id) const
 
 std::string Report::to_string() const
 {
-  static const char * words[] = {"ok", "warn", "fail", "unknown"};
+  static const char * words[] = {"ok", "warn", "fail", "unknown", "info"};
   std::string out;
   for (const auto & f : findings) {
     out += f.id;
@@ -259,22 +259,22 @@ std::string Report::to_string() const
   return out;
 }
 
-Report preflight(const Options & opts, int control_priority)
+Report preflight(const Options & opts, int control_priority, Strictness strict)
 {
-  return detail::preflight_to(0, opts, control_priority);
+  return detail::preflight_to(0, opts, control_priority, strict);
 }
 
-Report detail::preflight_to(int tid, const Options & opts, int control_priority)
+Report detail::preflight_to(int tid, const Options & opts, int control_priority, Strictness strict)
 {
-  return preflight_at("", tid, opts, control_priority);
+  return preflight_at("", tid, opts, control_priority, strict);
 }
 
 Report detail::preflight_at(
-  const std::string & root, int tid, const Options & opts, int control_priority)
+  const std::string & root, int tid, const Options & opts, int control_priority, Strictness strict)
 {
   opts.validate();
   Report rep;
-  host::preflight_into(rep, host::Fs(root), tid, opts, control_priority);
+  host::preflight_into(rep, host::Fs(root), tid, opts, control_priority, strict);
   return rep;
 }
 
@@ -297,7 +297,7 @@ Report detail::apply_checked_to(
   // judgement. Preflighting here would report a host that no caller asked anything of.
   if (opts.policy == Policy::Inherit && opts.cpus.empty()) return Report{};
 
-  Report rep = detail::preflight_to(tid, opts, control_priority);
+  Report rep = detail::preflight_to(tid, opts, control_priority, strict);
   const bool blocked = !rep.ok() || (strict == Strictness::Hard && has_warn(rep));
   if (blocked) {
     throw std::runtime_error(

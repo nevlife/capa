@@ -502,7 +502,7 @@ arch_sys_counter
 === /sys/devices/virtual/workqueue/cpumask
 f0f
 === /sys/kernel/mm/transparent_hugepage/enabled
-always [madvise] never
+[always] madvise never
 === /sys/kernel/mm/transparent_hugepage/defrag
 always defer defer+madvise [madvise] never
 === /sys/kernel/mm/transparent_hugepage/khugepaged/defrag

@@ -152,16 +152,18 @@ cyra::Report whole = cyra::preflight(spec);                        // 파일 전
 cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카운터까지
 ```
 
-`Report`는 `findings`를 담는다. `Finding`은 `id`(안정 슬러그), `verdict`, `detail`이다. `Verdict`는 `Ok`, `Warn`, `Fail`, `Unknown`이고, `Unknown`은 소스를 읽지 못한 것이지 통과가 아니다. `ok()`는 "`Fail` 없음"이다. `find(id)`는 finding 하나나 null을 준다. `to_string()`은 사람이 읽는 것이고 파싱할 형식이 아니다.
+`Report`는 `findings`를 담는다. `Finding`은 `id`(안정 슬러그), `verdict`, `detail`이다. `Verdict`는 `Ok`, `Warn`, `Fail`, `Unknown`, `Info`다. `Unknown`은 소스를 읽지 못한 것이지 통과가 아니다. `Info`는 알아 둘 사실이고, 어떤 strictness에서도 막지 않는다. `ok()`는 "`Fail` 없음"이다. `find(id)`는 finding 하나나 null을 준다. `to_string()`은 사람이 읽는 것이고 파싱할 형식이 아니다.
+
+`preflight(opts, control_priority=0, strict=Soft)`는 요청 하나에 대해 호스트를 판정한다. `strict`는 그 요청을 어떻게 읽을지다. 아래 finding 몇 개는 hard stage면 Warn, soft stage면 Info다. `apply_checked`와 `bind`는 자기 strictness를 넘긴다. 적용을 막을 수 있는 것은 Warn과 Fail뿐이고 Info는 막지 않는다.
 
 `preflight` finding. 어느 것이 도는지는 요청에 달렸다. 첫 묶음은 RT 정책이 있을 때, 둘째 묶음은 `cpus`가 있을 때 돌고, 셋째 묶음은 늘 돈다. 마지막 묶음은 스레드가 속한 프로세스에 관한 것이라 커널 스레드에서는 빠진다. 읽을 수 없는 소스(root 전용 debugfs, lockdown, 다른 사용자의 프로세스)는 Unknown이고 Fail이 되지 않는다.
 
-| id | 소스 | Fail / Warn |
+| id | 소스 | Fail / Warn / Info |
 | --- | --- | --- |
 | `policy-permission` | `CapEff`(CAP_SYS_NICE)와 `/proc/self/limits`의 `RLIMIT_RTPRIO` | Fail: 권한이 없다. seccomp, LSM 라벨, `hidepid`가 걸려 있으면 detail에 적는다 |
 | `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us`, debugfs `sched/fair_server/cpuN`(6.12+) | Warn: throttle이나 fair deadline server가 바쁜 RT 스레드의 CPU를 우선순위와 무관하게 뺏는다. 6.12+에서 `-1`인데 fair server를 읽지 못하면 Unknown |
 | `priority-order` | `opts.priority`와 `control_priority` | Fail: control loop 이상. `control_priority`가 0이면 Unknown |
-| `priority-band` | `opts.priority` | Warn: 99. 커널의 stopper와 watchdog 작업이 도는 자리다(10절) |
+| `priority-band` | `opts.priority` | Info: 99. 커널의 stopper와 watchdog 작업이 도는 자리다(10절) |
 | `cpu-online` | `/sys/devices/system/cpu/online` | Fail: 없는 CPU |
 | `cpu-isolation` | `/sys/devices/system/cpu/isolated`, 루트 `cpuset.cpus.isolated`, `nohz_full` | Warn: 다른 태스크와 CPU를 나눠 쓴다 |
 | `cpuset` | 프로세스 cgroup의 `cpuset.cpus.effective`, 루트까지의 `cpuset.cpus.partition` | Fail: cpuset 밖의 CPU(컨테이너, systemd `AllowedCPUs`). Warn: invalid partition. cgroup v2가 없으면(JetPack 5) Unknown |
@@ -173,39 +175,39 @@ cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카�
 | `irq-default-affinity` | `/proc/irq/default_smp_affinity` | Warn: 나중에 생기는 인터럽트(핫플러그 카메라)가 그 CPU에서 시작한다 |
 | `irqbalance` | 돌고 있는 `irqbalance` | Warn: 약 10초마다 인터럽트 affinity를 다시 쓴다 |
 | `cpu-idle` | `cpuidle/stateN/{latency,disable}`, `power/pm_qos_resume_latency_us` | Warn: 허용된 idle state의 exit latency가 50 us를 넘는다 |
-| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | Warn: unbound 커널 작업이 그 CPU에서 돈다 |
-| `kthread-affinity` | CPU 둘 이상에 허용된 커널 스레드 | Warn: 그 CPU에서 돌 수 있는 것이 있다 |
-| `smt` | `topology/thread_siblings_list` | Warn: SMT sibling이 격리되지 않았다 |
-| `cpu-capacity` | `cpu_capacity` | Warn: capacity가 낮은 코어(효율 코어) |
-| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | Warn: 4초 softlockup 타이머가 그 CPU에서 돈다 |
+| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | hard stage면 Warn, soft stage면 Info: unbound 커널 작업이 그 CPU에서 돈다 |
+| `kthread-affinity` | CPU 둘 이상에 허용된 커널 스레드 | hard stage면 Warn, soft stage면 Info: 그 CPU에서 돌 수 있는 것이 있다 |
+| `smt` | `topology/thread_siblings_list` | hard stage면 Warn, soft stage면 Info: SMT sibling이 격리되지 않았다 |
+| `cpu-capacity` | `cpu_capacity` | Info: capacity가 낮은 코어(효율 코어) |
+| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | hard stage면 Warn, soft stage면 Info: 4초 softlockup 타이머가 그 CPU에서 돈다 |
 | `kernel-preemption` | `/sys/kernel/realtime`, `/proc/version` | Warn: PREEMPT_RT가 아니다 |
 | `preempt-mode` | `/proc/version`, debugfs `sched/preempt` | Warn: `none`이나 `voluntary`, 그리고 RT가 아닌 stage의 `lazy`. debugfs를 읽지 못하면 Unknown |
 | `sched-ext` | `/sys/kernel/sched_ext/state` | Warn: BPF 스케줄러가 이 stage나 그 reset 자식을 맡는다 |
-| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: `always` |
-| `compaction` | `vm.compact_unevictable_allowed` | Warn: 1이라 compaction이 mlock된 페이지를 옮긴다 |
-| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Warn: 노드가 둘 이상인데 켜져 있다 |
-| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Warn: 비율 한도다. 한도를 넘겨 쓰는 스레드는 잠든다 |
-| `audit` | 부트 라인의 `audit=`, `auditd` | Warn: audit가 켜져 있다. 둘 다 말이 없으면 Unknown |
-| `console` | `/proc/consoles`, `kernel.printk` | Warn: PREEMPT_RT가 아닌 커널에 시리얼 콘솔이 있다 |
-| `clocksource` | `current_clocksource` | Warn: `tsc`, `arch_sys_counter`, `kvm-clock`가 아니라 `clock_gettime`이 vDSO를 벗어난다 |
-| `virtualization` | CPU의 `hypervisor` 플래그, `/sys/hypervisor` | Warn: 가상 머신이다. 여기서 잰 지연은 실기와 무관하다 |
-| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Warn: preflight 뒤에 클럭이나 online CPU를 바꿀 수 있는 것이 있다 |
+| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: defrag가 `always`라 fault 경로에서 compaction이 돈다. Info: enabled가 `always` |
+| `compaction` | `vm.compact_unevictable_allowed` | Info: 1이라 compaction이 mlock된 페이지를 옮긴다 |
+| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Info: 노드가 둘 이상인데 켜져 있다 |
+| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Info: 비율 한도다. 한도를 넘겨 쓰는 스레드는 잠든다 |
+| `audit` | 부트 라인의 `audit=`, `auditd` | Info: audit가 켜져 있다. 둘 다 말이 없으면 Unknown |
+| `console` | `/proc/consoles`, `kernel.printk` | Info: PREEMPT_RT가 아닌 커널에 시리얼 콘솔이 있다 |
+| `clocksource` | `current_clocksource` | Warn: `hpet`이나 `acpi_pm`이라 읽기 한 번에 1 us쯤 든다. Info: `tsc`, `arch_sys_counter`, `kvm-clock`가 아닌 다른 clocksource |
+| `virtualization` | CPU의 `hypervisor` 플래그, `/sys/hypervisor` | Info: 가상 머신이다. 여기서 잰 지연은 실기와 무관하다 |
+| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Info: preflight 뒤에 클럭이나 online CPU를 바꿀 수 있는 것이 있다 |
 | `memory-lock` | `/proc/<pid>/status`의 `VmLck` | Warn: 잠긴 메모리가 없다. page fault는 상한 없는 지연이다 |
 | `cgroup-cpu` | cgroup을 따라 올라간 `cpu.max` | Warn: quota가 있는데 SCHED_OTHER 스레드(stage 자신이나 reset 자식)가 그 안에서 돈다 |
-| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Warn: `memory.high`가 걸려 있거나 oomd가 돈다 |
+| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Info: `memory.high`가 걸려 있거나 oomd가 돈다 |
 | `secure-exec` | `/proc/<pid>/auxv`의 `AT_SECURE` | Warn: ld.so가 `LD_PRELOAD`를 버렸다(10절) |
-| `bind-now` | 환경의 `LD_BIND_NOW`, 매핑된 모든 객체의 `BIND_NOW` | Warn: lazy binding하는 객체가 있다(10절) |
+| `bind-now` | 환경의 `LD_BIND_NOW`, 매핑된 모든 객체의 `BIND_NOW` | Info: lazy binding하는 객체가 있다(10절) |
 
 `preflight(spec)`는 stage 하나로는 보이지 않는 것, 즉 파일 전체를 이 호스트에서 판정한다. bind 때는 돌지 않고 `cyra check`와 `cyra status`가 출력한다.
 
-| id | Fail / Warn |
+| id | Fail / Warn / Info |
 | --- | --- |
 | `housekeeping` | Fail: 격리 CPU와 hard RT worker의 CPU가 online CPU를 전부 덮는다 |
 | `foreign-rt-thread` | stage마다 Warn: 파일이 선언하지 않은 SCHED_FIFO나 SCHED_RR 스레드가 stage의 CPU에서 stage 이상의 우선순위로 돌 수 있다. 커널 스레드와 인터럽트 스레드도 센다. `migration/N`은 세지 않는다. 선언됐다는 것은 stage를 쥐었거나, `match`가 가리키거나, external stage의 `expect_priority`로 돌거나, inherit stage의 자식이라는 뜻이다 |
 | `deadline-task` | Warn: SCHED_DEADLINE 태스크가 stage CPU에서 돌 수 있다. 모든 FIFO stage보다 위에서 돈다. `sugov:N`은 schedutil의 것이다 |
 | `nohz-single-task` | Warn: `nohz_full` CPU 하나에 stage가 둘이다. tick은 실행 가능한 태스크가 하나일 때만 멈춘다 |
 | `smt-neighbor` | Warn: hard RT worker 둘이 한 코어의 SMT sibling에 있다 |
-| `llc-handoff` | Ok, 참고용: 체인에서 이웃한 stage의 CPU가 last-level cache를 나누지 않는다(`cache/index3`, 없으면 cpufreq `related_cpus`) |
+| `llc-handoff` | Info: 체인에서 이웃한 stage의 CPU가 last-level cache를 나누지 않는다(`cache/index3`, 없으면 cpufreq `related_cpus`) |
 | `taint` | Warn: 커널이 W(경고 발생)나 L(soft lockup)로 tainted다 |
 
 `verify(stage, tid)`는 아무것도 걸지 않는다. cyra가 건 뒤 `chrt`, systemd, 다른 코드가 스레드를 옮길 수 있고, 그것을 여기서 본다.
@@ -375,7 +377,7 @@ PREEMPT_RT에서 타이머는 두 문맥 중 하나에서 만료된다. RT와 DE
 
 | 대역 | 용도 |
 | --- | --- |
-| 99 | 커널의 watchdog과 stopper 작업. stage는 두지 않는다(`priority-band` Warn) |
+| 99 | 커널의 watchdog과 stopper 작업. stage는 두지 않는다(`priority-band`가 알린다) |
 | 85..94 | RT stage를 먹이는 인터럽트 스레드 |
 | 80..89 | 주 RT stage |
 | 50..79 | 그 밖의 인터럽트 스레드(커널은 50으로 시작한다) |

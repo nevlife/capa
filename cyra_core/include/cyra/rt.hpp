@@ -56,7 +56,8 @@ int this_tid();
 // is gone must not read as a thread at the wrong priority.
 ThreadState observe(int tid);
 
-enum class Verdict : std::uint8_t { Ok, Warn, Fail, Unknown };
+// Info is a fact worth knowing that blocks nothing, at any strictness.
+enum class Verdict : std::uint8_t { Ok, Warn, Fail, Unknown, Info };
 
 enum class Strictness : std::uint8_t {
   Soft,  // Warn findings are returned, not thrown
@@ -81,7 +82,9 @@ struct Report
 };
 
 // control_priority 0 reports `priority-order` Unknown: a check that did not run must not pass.
-Report preflight(const Options & opts, int control_priority = 0);
+// `strict` is how the request will be read: some findings are a Warn only for a hard stage.
+Report preflight(
+  const Options & opts, int control_priority = 0, Strictness strict = Strictness::Soft);
 
 // A blocking verdict throws before the thread is touched. The result is read back, since an
 // accepted request can still land elsewhere; a mismatch throws with the thread already changed.
@@ -91,10 +94,13 @@ Report apply_checked(
 namespace detail
 {
 // The daemon's, on thread `tid`: memory-lock is judged on its process; read-back is observe().
-Report preflight_to(int tid, const Options & opts, int control_priority);
+Report preflight_to(
+  int tid, const Options & opts, int control_priority, Strictness strict = Strictness::Soft);
 Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
 // preflight_to with every /proc and /sys path read under `root`, for tests on host snapshots.
-Report preflight_at(const std::string & root, int tid, const Options & opts, int control_priority);
+Report preflight_at(
+  const std::string & root, int tid, const Options & opts, int control_priority,
+  Strictness strict = Strictness::Soft);
 }  // namespace detail
 
 }  // namespace cyra

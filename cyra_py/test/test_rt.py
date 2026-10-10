@@ -392,3 +392,14 @@ def test_verify_with_a_window_reads_counters(tmp_path):
     rep = cyra.verify(stage, cyra.this_tid(), 0.05)
     for id in ("thread-faults", "thread-migrations", "cpu-interrupts", "cgroup-throttle"):
         assert rep.find(id) is not None, id
+
+
+# Facts that do not move a stage's latency are Info at any strictness, so they cannot refuse.
+def test_informational_findings_never_block_a_hard_request():
+    info = {"dirty-limits", "compaction", "power-policy", "bind-now", "cpu-capacity", "audit"}
+    opts = cyra.Options(cyra.Policy.Fifo, 99, [spare_cpus[0]])
+    rep = cyra.preflight(opts, strict=cyra.Strictness.Hard)
+    assert rep.find("priority-band").verdict == cyra.Verdict.Info
+    for f in rep.findings:
+        if f.id in info:
+            assert f.verdict != cyra.Verdict.Warn, f.id

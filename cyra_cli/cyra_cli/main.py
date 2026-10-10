@@ -56,7 +56,7 @@ def cmd_check(args):
         if s.external:
             rows.append([stage_name(s), s.chain, "external", "-", "not set by cyra"])
             continue
-        rep = cyra.preflight(s.opts)
+        rep = cyra.preflight(s.opts, strict=s.strict)
         stops = _blocks(s, rep)
         blocked += stops
         target = "hard" if s.strict == cyra.Strictness.Hard else "soft"
@@ -73,7 +73,10 @@ def cmd_check(args):
     if args.verbose:
         for s in spec.stages():
             if not s.external:
-                print(f"\n{stage_name(s)}\n{cyra.preflight(s.opts).to_string()}", end="")
+                print(
+                    f"\n{stage_name(s)}\n{cyra.preflight(s.opts, strict=s.strict).to_string()}",
+                    end="",
+                )
     return 1 if blocked or not whole.ok() else 0
 
 
@@ -94,7 +97,7 @@ def _host_drift(spec):
     for s in spec.stages():
         if s.external or not s.opts.cpus:
             continue
-        for f in cyra.preflight(s.opts).findings:
+        for f in cyra.preflight(s.opts, strict=s.strict).findings:
             if f.id not in _THIS_PROCESS:
                 seen[(f.id, f.detail)] = f
     return list(seen.values())

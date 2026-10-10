@@ -64,7 +64,7 @@ rust::Vec<Stage> stages(const cyra::Spec & spec)
 rust::String refusal(const cyra::Spec & spec, std::size_t index, int tid)
 {
   const cyra::Stage & st = spec.stages().at(index);
-  const cyra::Report host = cyra::detail::preflight_to(tid, st.opts, 0);
+  const cyra::Report host = cyra::detail::preflight_to(tid, st.opts, 0, st.strict);
   const bool warned = std::any_of(host.findings.begin(), host.findings.end(), [](const auto & f) {
     return f.verdict == cyra::Verdict::Warn;
   });

@@ -244,7 +244,7 @@ void bind_now(Report & rep, const Fs & fs, int tid)
     return;
   }
   add(
-    rep, "bind-now", Verdict::Warn,
+    rep, "bind-now", Verdict::Info,
     std::to_string(lazy.size()) + " mapped object(s) bind lazily (" + list_some(lazy, 3) +
       "): the first call through each PLT entry runs the dynamic linker on the RT path. Set "
       "LD_BIND_NOW=1 or link with -z now");
@@ -323,7 +323,7 @@ void priority_band(Report & rep, const Options & opts)
 {
   if (opts.priority == 99) {
     add(
-      rep, "priority-band", Verdict::Warn,
+      rep, "priority-band", Verdict::Info,
       "priority 99 is where the kernel's own watchdog and stopper work runs; a stage there "
       "delays them. Use 80..89 for main RT tasks and 85..94 for the IRQ threads that feed them");
   } else {
@@ -645,7 +645,7 @@ void cpu_idle(Report & rep, const Fs & fs, const Options & opts)
   }
 }
 
-void workqueue(Report & rep, const Fs & fs, const Options & opts)
+void workqueue(Report & rep, const Fs & fs, const Options & opts, bool hard)
 {
   const auto mask = fs.read("/sys/devices/virtual/workqueue/cpumask");
   if (!mask) {
@@ -660,13 +660,13 @@ void workqueue(Report & rep, const Fs & fs, const Options & opts)
     add(rep, "workqueue", Verdict::Ok, "unbound workqueues avoid the requested cpus");
   } else {
     add(
-      rep, "workqueue", Verdict::Warn,
+      rep, "workqueue", hard ? Verdict::Warn : Verdict::Info,
       "workqueue cpumask " + trimmed(*mask) + " includes cpu " + join(hit) +
         ": unbound kernel work runs there; write a mask without them");
   }
 }
 
-void kthreads(Report & rep, const std::vector<Task> & procs, const Options & opts)
+void kthreads(Report & rep, const std::vector<Task> & procs, const Options & opts, bool hard)
 {
   std::vector<std::string> hit;
   for (const auto & t : procs) {
@@ -678,13 +678,13 @@ void kthreads(Report & rep, const std::vector<Task> & procs, const Options & opt
       "no unbound kernel thread may run on the requested cpus");
   } else {
     add(
-      rep, "kthread-affinity", Verdict::Warn,
+      rep, "kthread-affinity", hard ? Verdict::Warn : Verdict::Info,
       std::to_string(hit.size()) + " unbound kernel thread(s) may run on the requested cpus (" +
         list_some(hit, 3) + ")");
   }
 }
 
-void smt(Report & rep, const Fs & fs, const Options & opts)
+void smt(Report & rep, const Fs & fs, const Options & opts, bool hard)
 {
   const Cpus isolated = isolated_cpus(fs);
   std::vector<std::string> open;
@@ -705,7 +705,7 @@ void smt(Report & rep, const Fs & fs, const Options & opts)
     add(rep, "smt", Verdict::Ok, "no SMT sibling of the requested cpus runs other work");
   } else {
     add(
-      rep, "smt", Verdict::Warn,
+      rep, "smt", hard ? Verdict::Warn : Verdict::Info,
       "SMT siblings not isolated: " + list_some(open, 3) +
         ". A task on the sibling shares the core's pipeline and caches");
   }
@@ -728,13 +728,13 @@ void capacity(Report & rep, const Fs & fs, const Options & opts)
     add(rep, "cpu-capacity", Verdict::Ok, "requested cpus have the highest capacity");
   } else {
     add(
-      rep, "cpu-capacity", Verdict::Warn,
+      rep, "cpu-capacity", Verdict::Info,
       "lower-capacity cores requested (" + list_some(low, 3) + " of " + std::to_string(top) +
         "): an efficiency core runs the same work slower");
   }
 }
 
-void softlockup(Report & rep, const Fs & fs, const Options & opts)
+void softlockup(Report & rep, const Fs & fs, const Options & opts, bool hard)
 {
   const auto watchdog = fs.read("/proc/sys/kernel/watchdog");
   const auto soft = fs.read("/proc/sys/kernel/soft_watchdog");
@@ -751,7 +751,7 @@ void softlockup(Report & rep, const Fs & fs, const Options & opts)
     add(rep, "softlockup-watchdog", Verdict::Ok, "the softlockup watchdog leaves the cpus alone");
   } else {
     add(
-      rep, "softlockup-watchdog", Verdict::Warn,
+      rep, "softlockup-watchdog", hard ? Verdict::Warn : Verdict::Info,
       "cpu " + join(hit) +
         " is in watchdog_cpumask: a 4 s hrtimer there wakes the stopper thread above FIFO 99. "
         "The default mask follows nohz_full, so isolcpus alone leaves the cpu in it");
@@ -866,7 +866,7 @@ void cgroup_limits(
   const bool oomd = running(procs, "systemd-oomd");
   if (!high.empty() || oomd) {
     add(
-      rep, "cgroup-memory", Verdict::Warn,
+      rep, "cgroup-memory", Verdict::Info,
       (high.empty()
          ? std::string()
          : list_some(high, 2) + ": an allocation past it is throttled in reclaim, RT or not. ") +
@@ -889,13 +889,18 @@ void memory_kernel(Report & rep, const Fs & fs)
     const std::string k =
       trimmed(fs.read("/sys/kernel/mm/transparent_hugepage/khugepaged/defrag").value_or("?"));
     const std::string facts = "enabled " + e + ", defrag " + d + ", khugepaged defrag " + k;
-    if (e == "always" || d == "always") {
+    if (d == "always") {
       add(
         rep, "thp", Verdict::Warn,
         facts +
-          ": khugepaged collapses take the mmap_lock for write and flush the TLB, and "
-          "defrag=always compacts in the fault path for tens of ms. Use madvise or never, "
-          "or PR_SET_THP_DISABLE for the process");
+          ": defrag=always compacts in the fault path for tens of ms. Use madvise or never, or "
+          "PR_SET_THP_DISABLE for the process");
+    } else if (e == "always") {
+      add(
+        rep, "thp", Verdict::Info,
+        facts +
+          ": khugepaged collapses take the mmap_lock for write and flush the TLB. madvise or "
+          "PR_SET_THP_DISABLE keeps them out of the process");
     } else {
       add(rep, "thp", Verdict::Ok, facts);
     }
@@ -906,7 +911,7 @@ void memory_kernel(Report & rep, const Fs & fs)
       rep, "compaction", Verdict::Unknown, "cannot read /proc/sys/vm/compact_unevictable_allowed");
   } else if (trimmed(*unevictable) == "1") {
     add(
-      rep, "compaction", Verdict::Warn,
+      rep, "compaction", Verdict::Info,
       "compact_unevictable_allowed=1: compaction migrates mlocked pages, so a locked page can "
       "still fault while it moves; set it to 0");
   } else {
@@ -918,7 +923,7 @@ void memory_kernel(Report & rep, const Fs & fs)
     add(rep, "numa-balancing", Verdict::Ok, "one NUMA node");
   } else if (balancing && trimmed(*balancing) != "0") {
     add(
-      rep, "numa-balancing", Verdict::Warn,
+      rep, "numa-balancing", Verdict::Info,
       "numa_balancing=" + trimmed(*balancing) + " on " + std::to_string(nodes.size()) +
         " nodes: task_numa_work unmaps pages to sample faults and migrates them; mlock does not "
         "stop migration. Set it to 0");
@@ -937,7 +942,7 @@ void memory_kernel(Report & rep, const Fs & fs)
     const long long total_kb = mem ? number(words(*mem).at(0), 0) : 0;
     const long long ratio = number(fs.read("/proc/sys/vm/dirty_ratio"), 20);
     add(
-      rep, "dirty-limits", Verdict::Warn,
+      rep, "dirty-limits", Verdict::Info,
       "dirty_ratio " + std::to_string(ratio) + "% lets up to about " +
         std::to_string(total_kb * ratio / 100 / 1024 / 1024) +
         " GiB of dirty page cache build up, and a thread writing past it sleeps in "
@@ -953,7 +958,7 @@ void audit(Report & rep, const Fs & fs, const std::vector<Task> & procs)
     add(rep, "audit", Verdict::Ok, "audit=0 on the boot line");
   } else if (running(procs, "auditd") || (param && *param == "1")) {
     add(
-      rep, "audit", Verdict::Warn,
+      rep, "audit", Verdict::Info,
       "audit is on: once enabled, every new task takes the syscall audit path even with no rules, "
       "and a full backlog makes the task that writes a record sleep up to backlog_wait_time. "
       "Add -a never,task, and check auditctl -s");
@@ -991,7 +996,7 @@ void console(Report & rep, const Fs & fs)
       list_some(serial, 3) + ": PREEMPT_RT prints from its own threads");
   } else {
     add(
-      rep, "console", Verdict::Warn,
+      rep, "console", Verdict::Info,
       "serial console " + list_some(serial, 3) + " at console_loglevel " + level +
         ": a kernel message is written out in the context of whoever logged it, at serial speed. "
         "Lower the loglevel or drop the console= entry");
@@ -1010,9 +1015,10 @@ void clocksource(Report & rep, const Fs & fs)
     add(rep, "clocksource", Verdict::Ok, "clocksource " + name + " reads through the vDSO");
   } else {
     add(
-      rep, "clocksource", Verdict::Warn,
+      rep, "clocksource", name == "hpet" || name == "acpi_pm" ? Verdict::Warn : Verdict::Info,
       "clocksource " + name +
-        ": clock_gettime leaves the vDSO and one read costs about a microsecond");
+        ": clock_gettime leaves the vDSO, and on hpet or acpi_pm one read costs about a "
+        "microsecond");
   }
 }
 
@@ -1027,7 +1033,7 @@ void virtualization(Report & rep, const Fs & fs)
                      fs.exists("/proc/device-tree/hypervisor");
   if (guest) {
     add(
-      rep, "virtualization", Verdict::Warn,
+      rep, "virtualization", Verdict::Info,
       "this is a virtual machine: the host schedules its vcpus, so latency measured here says "
       "nothing about bare metal");
   } else {
@@ -1049,7 +1055,7 @@ void power_policy(Report & rep, const Fs & fs, const std::vector<Task> & procs)
     add(rep, "power-policy", Verdict::Ok, "no power policy owner seen");
   } else {
     add(
-      rep, "power-policy", Verdict::Warn,
+      rep, "power-policy", Verdict::Info,
       list_some(owners, 4) +
         " can change governors, EPP, clocks or online cpus after preflight; pin its profile or "
         "stop it");
@@ -1090,9 +1096,11 @@ std::string blocking_layers(const Fs & fs)
   return layers(fs);
 }
 
-void preflight_into(Report & rep, const Fs & fs, int tid, const Options & opts, int control)
+void preflight_into(
+  Report & rep, const Fs & fs, int tid, const Options & opts, int control, Strictness strict)
 {
   const bool rt = rt_policy(opts.policy);
+  const bool hard = strict == Strictness::Hard;
   if (rt) {
     permission(rep, fs, opts);
     rt_throttle(rep, fs, opts);
@@ -1111,11 +1119,11 @@ void preflight_into(Report & rep, const Fs & fs, int tid, const Options & opts, 
     irq_default(rep, fs, opts);
     irqbalance(rep, procs);
     cpu_idle(rep, fs, opts);
-    workqueue(rep, fs, opts);
-    kthreads(rep, procs, opts);
-    smt(rep, fs, opts);
+    workqueue(rep, fs, opts, hard);
+    kthreads(rep, procs, opts, hard);
+    smt(rep, fs, opts, hard);
     capacity(rep, fs, opts);
-    softlockup(rep, fs, opts);
+    softlockup(rep, fs, opts, hard);
   }
   kernel_preemption(rep, fs);
   preempt_mode(rep, fs, opts);
@@ -1346,9 +1354,9 @@ void llc(Report & rep, const Fs & fs, const Spec & spec)
     add(rep, "llc-handoff", Verdict::Ok, "adjacent stages share a last-level cache");
   } else {
     add(
-      rep, "llc-handoff", Verdict::Ok,
-      "for information: these handoffs cross last-level caches, so each moves its cache lines "
-      "between clusters: " +
+      rep, "llc-handoff", Verdict::Info,
+      "these handoffs cross last-level caches, so each moves its cache lines between "
+      "clusters: " +
         list_some(crossings, 3));
   }
 }

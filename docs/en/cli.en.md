@@ -10,7 +10,7 @@ The file is the argument, or `CYRA_SPEC` when none is given.
 | 1 | The file breaks a rule, a stage would be refused or the whole file fails on this host (`check`), or something failed (`status`) |
 | 2 | Bad arguments, or no file named at all |
 
-Summaries show `ok`, `warn`, and `FAIL`. An `Unknown` finding (a source that could not be read, or an item the file claims nothing about) is left out of the summary; `-v` prints every finding.
+Summaries show `ok`, `warn`, and `FAIL`. An `Unknown` finding (a source that could not be read, or an item the file claims nothing about) and an `Info` finding (a fact that blocks nothing) are left out of the summary; `-v` prints every finding.
 
 ## `cyra check [FILE] [-v]`
 

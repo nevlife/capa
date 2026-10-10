@@ -108,7 +108,7 @@ ffff
 === /sys/kernel/mm/transparent_hugepage/enabled
 [always] madvise never
 === /sys/kernel/mm/transparent_hugepage/defrag
-always defer defer+madvise [madvise] never
+[always] defer defer+madvise madvise never
 === /sys/kernel/mm/transparent_hugepage/khugepaged/defrag
 1
 === /sys/fs/cgroup/cpuset.cpus.effective

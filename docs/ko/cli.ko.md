@@ -10,7 +10,7 @@
 | 1 | 파일이 규칙을 어겼다. 거절될 stage가 있거나 파일 전체가 이 호스트에서 실패한다(`check`). 실패가 있다(`status`) |
 | 2 | 인자 오류, 또는 파일 미지정 |
 
-요약에는 `ok`, `warn`, `FAIL`만 나온다. `Unknown` finding(읽지 못한 소스, 파일이 주장하지 않는 항목)은 요약에서 뺀다. `-v`가 finding을 전부 보여 준다.
+요약에는 `ok`, `warn`, `FAIL`만 나온다. `Unknown` finding(읽지 못한 소스, 파일이 주장하지 않는 항목)과 `Info` finding(아무것도 막지 않는 사실)은 요약에서 뺀다. `-v`가 finding을 전부 보여 준다.
 
 ## `cyra check [FILE] [-v]`
 

@@ -5,7 +5,13 @@
 # Left out: environ, maps and auxv (the shell's environment and file paths), processes other than
 # RT or unbound kernel threads and a few daemons, and every status line preflight does not read.
 # Disk UUIDs on the boot line are blanked. Run as root to include debugfs.
+#
+# The output still identifies the host: kernel build string, kernel threads, cgroup paths, process
+# names. It is a reference for writing a fixture by hand, not a fixture to commit.
 set -u
+
+echo "capture.sh: this snapshot identifies the host (kernel build, kernel threads, cgroup paths," \
+  "process names); do not commit it as-is, write the fixture by hand from it" >&2
 
 emit() {
   local content

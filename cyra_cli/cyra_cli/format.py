@@ -2,10 +2,17 @@
 
 import cyra
 
-_RANK = {cyra.Verdict.Ok: 0, cyra.Verdict.Unknown: 1, cyra.Verdict.Warn: 2, cyra.Verdict.Fail: 3}
+_RANK = {
+    cyra.Verdict.Ok: 0,
+    cyra.Verdict.Info: 0,
+    cyra.Verdict.Unknown: 1,
+    cyra.Verdict.Warn: 2,
+    cyra.Verdict.Fail: 3,
+}
 _WORD = {
     cyra.Verdict.Ok: "ok",
     cyra.Verdict.Unknown: "unknown",
+    cyra.Verdict.Info: "info",
     cyra.Verdict.Warn: "warn",
     cyra.Verdict.Fail: "FAIL",
 }
@@ -22,12 +29,14 @@ def verdict_word(v):
     return _WORD[v]
 
 
-# Unknown is left out of the one-line summary. In verify it means the file claims nothing about
-# that item, and in preflight it means a source was unreadable; neither is the thread or the host
-# being wrong, and printing it on every row would bury the rows that are. --verbose shows it.
+# Unknown and Info are left out of the one-line summary. Unknown means the file claims nothing
+# about the item (verify) or a source was unreadable (preflight), and Info blocks nothing; neither
+# is the thread or the host being wrong, and printing them on every row would bury the rows that
+# are. --verbose shows them.
 def worst(report):
     """Fail, else Warn, else Ok."""
-    seen = [f.verdict for f in report.findings if f.verdict != cyra.Verdict.Unknown]
+    quiet = (cyra.Verdict.Unknown, cyra.Verdict.Info)
+    seen = [f.verdict for f in report.findings if f.verdict not in quiet]
     return max(seen, key=_RANK.get, default=cyra.Verdict.Ok)
 
 

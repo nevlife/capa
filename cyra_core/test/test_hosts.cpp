@@ -7,11 +7,12 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
-// preflight judged on snapshots of other machines (test/hosts/*.host, written by capture.sh or by
-// hand): "=== <path>" starts a file, "=== <dir>/" makes a directory.
+// preflight judged on hand-written snapshots of other machines (test/hosts/*.host): "=== <path>"
+// starts a file, "=== <dir>/" makes a directory.
 
 namespace fs = std::filesystem;
 using cyra::Verdict;
@@ -48,9 +49,11 @@ public:
   Host & operator=(const Host &) = delete;
   ~Host() { fs::remove_all(root_); }
 
-  cyra::Report preflight(const cyra::Options & opts, int control = 0) const
+  cyra::Report preflight(
+    const cyra::Options & opts, int control = 0,
+    cyra::Strictness strict = cyra::Strictness::Soft) const
   {
-    return cyra::detail::preflight_at(root_, 0, opts, control);
+    return cyra::detail::preflight_at(root_, 0, opts, control, strict);
   }
 
   cyra::Report preflight(const std::string & yaml) const
@@ -84,10 +87,10 @@ void expect(const cyra::Report & rep, const std::map<std::string, Verdict> & wan
 
 }  // namespace
 
-TEST(Hosts, CapturedX86Desktop)
+TEST(Hosts, StockX86Desktop)
 {
-  const Host host("x86_desktop");
-  const auto rep = host.preflight(fifo(80, {2}), 90);
+  const Host host("x86_stock");
+  const auto rep = host.preflight(fifo(80, {2}), 90, cyra::Strictness::Hard);
   expect(
     rep, {
            {"policy-permission", Verdict::Fail},
@@ -97,6 +100,7 @@ TEST(Hosts, CapturedX86Desktop)
            {"cpu-governor", Verdict::Warn},
            {"cpufreq", Verdict::Warn},
            {"rcu-offload", Verdict::Warn},
+           {"irq-affinity", Verdict::Warn},
            {"irq-managed", Verdict::Unknown},
            {"irq-default-affinity", Verdict::Warn},
            {"cpu-idle", Verdict::Warn},
@@ -108,18 +112,72 @@ TEST(Hosts, CapturedX86Desktop)
            {"preempt-mode", Verdict::Unknown},
            {"sched-ext", Verdict::Ok},
            {"thp", Verdict::Ok},
-           {"compaction", Verdict::Warn},
+           {"compaction", Verdict::Info},
            {"numa-balancing", Verdict::Ok},
-           {"dirty-limits", Verdict::Warn},
+           {"dirty-limits", Verdict::Info},
            {"clocksource", Verdict::Ok},
            {"virtualization", Verdict::Ok},
-           {"power-policy", Verdict::Warn},
+           {"power-policy", Verdict::Info},
+           {"cgroup-memory", Verdict::Info},
            {"memory-lock", Verdict::Warn},
            {"secure-exec", Verdict::Unknown},
            {"bind-now", Verdict::Unknown},
          });
   EXPECT_NE(rep.find("rt-throttle")->detail.find("debugfs"), std::string::npos)
     << "a 6.12+ kernel whose fair server cannot be read must say so";
+}
+
+TEST(Hosts, ASoftStageSeesHardOnlyFindingsAsInformation)
+{
+  const Host host("x86_stock");
+  expect(
+    host.preflight(fifo(80, {2}), 90, cyra::Strictness::Soft),
+    {
+      {"workqueue", Verdict::Info},
+      {"kthread-affinity", Verdict::Info},
+      {"smt", Verdict::Info},
+      {"softlockup-watchdog", Verdict::Info},
+    });
+}
+
+// A hard chain is refused on a Warn. On a stock host every Warn left must be one that moves the
+// stage's latency; the facts that do not (dirty limits, power daemons, oomd) are Info.
+TEST(Hosts, AStockHostRefusesAHardChainOnlyForLatencyFindings)
+{
+  const std::set<std::string> latency = {
+    "policy-permission",
+    "rt-throttle",
+    "cpu-isolation",
+    "cpuset",
+    "cpu-governor",
+    "cpufreq",
+    "rcu-offload",
+    "irq-affinity",
+    "irq-managed",
+    "irq-default-affinity",
+    "irqbalance",
+    "cpu-idle",
+    "workqueue",
+    "kthread-affinity",
+    "smt",
+    "softlockup-watchdog",
+    "kernel-preemption",
+    "preempt-mode",
+    "sched-ext",
+    "cgroup-cpu",
+    "secure-exec",
+    "memory-lock",
+    "priority-order"};
+  const Host host("x86_stock");
+  const auto rep = host.preflight(fifo(80, {2}), 90, cyra::Strictness::Hard);
+  int info = 0;
+  for (const auto & f : rep.findings) {
+    if (f.verdict == Verdict::Warn || f.verdict == Verdict::Fail) {
+      EXPECT_EQ(latency.count(f.id), 1u) << f.id << " blocks a hard chain: " << f.detail;
+    }
+    info += f.verdict == Verdict::Info;
+  }
+  EXPECT_GE(info, 4) << rep.to_string();
 }
 
 TEST(Hosts, OrinJetPack6)
@@ -138,17 +196,18 @@ TEST(Hosts, OrinJetPack6)
                                             {"irq-default-affinity", Verdict::Ok},
                                             {"cpu-idle", Verdict::Warn},
                                             {"workqueue", Verdict::Ok},
-                                            {"kthread-affinity", Verdict::Warn},
+                                            {"kthread-affinity", Verdict::Info},
                                             {"smt", Verdict::Ok},
                                             {"cpu-capacity", Verdict::Ok},
                                             {"softlockup-watchdog", Verdict::Ok},
                                             {"kernel-preemption", Verdict::Warn},
                                             {"preempt-mode", Verdict::Ok},
                                             {"sched-ext", Verdict::Ok},
-                                            {"compaction", Verdict::Warn},
-                                            {"console", Verdict::Warn},
+                                            {"thp", Verdict::Info},
+                                            {"compaction", Verdict::Info},
+                                            {"console", Verdict::Info},
                                             {"clocksource", Verdict::Ok},
-                                            {"power-policy", Verdict::Warn},
+                                            {"power-policy", Verdict::Info},
                                             {"cgroup-cpu", Verdict::Ok},
                                             {"audit", Verdict::Unknown},
                                           });
@@ -172,7 +231,7 @@ chains:
            {"foreign-rt-thread", Verdict::Warn},
            {"deadline-task", Verdict::Warn},
            {"nohz-single-task", Verdict::Ok},
-           {"llc-handoff", Verdict::Ok},
+           {"llc-handoff", Verdict::Info},
            {"taint", Verdict::Ok},
          });
   const std::string foreign = rep.find("foreign-rt-thread")->detail;
@@ -194,13 +253,13 @@ TEST(Hosts, Container)
            {"cpu-idle", Verdict::Unknown},
            {"preempt-mode", Verdict::Unknown},
            {"thp", Verdict::Warn},
-           {"numa-balancing", Verdict::Warn},
-           {"audit", Verdict::Warn},
-           {"console", Verdict::Warn},
+           {"numa-balancing", Verdict::Info},
+           {"audit", Verdict::Info},
+           {"console", Verdict::Info},
            {"clocksource", Verdict::Ok},
-           {"virtualization", Verdict::Warn},
+           {"virtualization", Verdict::Info},
            {"cgroup-cpu", Verdict::Warn},
-           {"cgroup-memory", Verdict::Warn},
+           {"cgroup-memory", Verdict::Info},
          });
   const std::string why = rep.find("policy-permission")->detail;
   EXPECT_NE(why.find("seccomp mode 2"), std::string::npos) << why;
@@ -211,38 +270,39 @@ TEST(Hosts, RtKernelReadAsRoot)
 {
   const Host host("x86_rt_root");
   expect(
-    host.preflight(fifo(80, {2}), 90), {
-                                         {"policy-permission", Verdict::Ok},
-                                         {"rt-throttle", Verdict::Warn},
-                                         {"cpu-isolation", Verdict::Ok},
-                                         {"cpuset", Verdict::Warn},
-                                         {"cpufreq", Verdict::Ok},
-                                         {"irq-managed", Verdict::Warn},
-                                         {"irq-default-affinity", Verdict::Ok},
-                                         {"irqbalance", Verdict::Warn},
-                                         {"cpu-idle", Verdict::Ok},
-                                         {"smt", Verdict::Warn},
-                                         {"softlockup-watchdog", Verdict::Ok},
-                                         {"kernel-preemption", Verdict::Ok},
-                                         {"preempt-mode", Verdict::Ok},
-                                         {"sched-ext", Verdict::Warn},
-                                         {"thp", Verdict::Ok},
-                                         {"compaction", Verdict::Ok},
-                                         {"dirty-limits", Verdict::Ok},
-                                         {"audit", Verdict::Ok},
-                                         {"console", Verdict::Ok},
-                                         {"clocksource", Verdict::Warn},
-                                         {"memory-lock", Verdict::Ok},
-                                       });
+    host.preflight(fifo(80, {2}), 90, cyra::Strictness::Hard),
+    {
+      {"policy-permission", Verdict::Ok},
+      {"rt-throttle", Verdict::Warn},
+      {"cpu-isolation", Verdict::Ok},
+      {"cpuset", Verdict::Warn},
+      {"cpufreq", Verdict::Ok},
+      {"irq-managed", Verdict::Warn},
+      {"irq-default-affinity", Verdict::Ok},
+      {"irqbalance", Verdict::Warn},
+      {"cpu-idle", Verdict::Ok},
+      {"smt", Verdict::Warn},
+      {"softlockup-watchdog", Verdict::Ok},
+      {"kernel-preemption", Verdict::Ok},
+      {"preempt-mode", Verdict::Ok},
+      {"sched-ext", Verdict::Warn},
+      {"thp", Verdict::Ok},
+      {"compaction", Verdict::Ok},
+      {"dirty-limits", Verdict::Ok},
+      {"audit", Verdict::Ok},
+      {"console", Verdict::Ok},
+      {"clocksource", Verdict::Warn},
+      {"memory-lock", Verdict::Ok},
+    });
   cyra::Options inherit = fifo(80, {2});
   inherit.children = cyra::Children::Inherit;
   expect(host.preflight(inherit, 90), {{"sched-ext", Verdict::Ok}});
 }
 
-TEST(Hosts, PriorityNinetyNineIsWarned)
+TEST(Hosts, PriorityNinetyNineIsNoted)
 {
   const Host host("x86_rt_root");
-  expect(host.preflight(fifo(99, {2})), {{"priority-band", Verdict::Warn}});
+  expect(host.preflight(fifo(99, {2})), {{"priority-band", Verdict::Info}});
   expect(host.preflight(fifo(85, {2})), {{"priority-band", Verdict::Ok}});
 }
 

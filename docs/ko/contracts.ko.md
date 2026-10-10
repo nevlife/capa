@@ -31,6 +31,7 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 | X-021 | flux bind는 flux2 executor의 그룹 자식 스레드에도 도달한다 | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 | X-022 | 파일 전체의 preflight는 hard stage와 격리 CPU가 housekeeping CPU를 남기지 않으면 실패한다 | `Hosts.HousekeepingFailsWhenNothingIsLeft` | `test_preflight_of_a_file_fails_a_host_left_without_housekeeping` |
 | X-023 | window를 준 verify는 스레드와 그 CPU의 카운터를 더하고, 주지 않으면 읽지 않는다 | `Verify.AWindowReadsTheThreadsAndItsCpusCounters` | `test_verify_with_a_window_reads_counters` |
+| X-024 | Info finding은 적용을 막지 않는다. 일반 호스트에서 hard 요청은 지연에 영향을 주는 finding으로만 거절된다 | `Hosts.AStockHostRefusesAHardChainOnlyForLatencyFindings` | `test_informational_findings_never_block_a_hard_request` |
 
 ## 2. 의도한 차이
 

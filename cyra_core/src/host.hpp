@@ -71,7 +71,8 @@ Cpus isolated_cpus(const Fs & fs);
 // permission. Empty when none applies.
 std::string blocking_layers(const Fs & fs);
 
-void preflight_into(Report & rep, const Fs & fs, int tid, const Options & opts, int control);
+void preflight_into(
+  Report & rep, const Fs & fs, int tid, const Options & opts, int control, Strictness strict);
 Report preflight_spec(const Fs & fs, const Spec & spec);
 
 void verify_now(Report & rep, int tid, const ThreadState & st);

@@ -152,16 +152,18 @@ cyra::Report whole = cyra::preflight(spec);                        // the whole 
 cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // and its counters
 ```
 
-A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`, and `detail`. `Verdict` is `Ok`, `Warn`, `Fail`, or `Unknown`, and `Unknown` means the source could not be read, not a pass. `ok()` is "no `Fail`". `find(id)` returns one finding or null. `to_string()` is for people to read, not to parse.
+A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`, and `detail`. `Verdict` is `Ok`, `Warn`, `Fail`, `Unknown`, or `Info`. `Unknown` means the source could not be read, not a pass. `Info` is a fact worth knowing that blocks nothing at any strictness. `ok()` is "no `Fail`". `find(id)` returns one finding or null. `to_string()` is for people to read, not to parse.
+
+`preflight(opts, control_priority=0, strict=Soft)` judges the host for one request. `strict` is how the request will be read: a few findings below are a Warn for a hard stage and Info for a soft one. `apply_checked` and `bind` pass their own strictness. Only Warn and Fail can refuse an apply; Info never does.
 
 `preflight` findings. Which run depends on the request: the first group needs an RT policy, the second needs `cpus`, the third always runs, and the last is about the thread's process and is left out for a kernel thread. A source that cannot be read (root-only debugfs, lockdown, another user's process) gives Unknown, never Fail.
 
-| id | Source | Fail / Warn |
+| id | Source | Fail / Warn / Info |
 | --- | --- | --- |
 | `policy-permission` | `CapEff` (CAP_SYS_NICE) and `RLIMIT_RTPRIO` in `/proc/self/limits` | Fail: no permission. The detail names seccomp, the LSM label and `hidepid` when one is set |
 | `rt-throttle` | `/proc/sys/kernel/sched_rt_runtime_us`, debugfs `sched/fair_server/cpuN` (6.12+) | Warn: the throttle, or the fair deadline server, takes the cpu from a busy RT thread regardless of priority. Unknown at `-1` on 6.12+ when the fair server cannot be read |
 | `priority-order` | `opts.priority` against `control_priority` | Fail: at or above the control loop. Unknown when `control_priority` is 0 |
-| `priority-band` | `opts.priority` | Warn: 99, where the kernel's stopper and watchdog work runs (section 10) |
+| `priority-band` | `opts.priority` | Info: 99, where the kernel's stopper and watchdog work runs (section 10) |
 | `cpu-online` | `/sys/devices/system/cpu/online` | Fail: the cpu does not exist |
 | `cpu-isolation` | `/sys/devices/system/cpu/isolated`, root `cpuset.cpus.isolated`, `nohz_full` | Warn: the cpu is shared with other tasks |
 | `cpuset` | `cpuset.cpus.effective` of the process's cgroup, `cpuset.cpus.partition` up to the root | Fail: a cpu outside the cpuset (a container, systemd `AllowedCPUs`). Warn: an invalid partition. Unknown without cgroup v2 (JetPack 5) |
@@ -173,39 +175,39 @@ A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`,
 | `irq-default-affinity` | `/proc/irq/default_smp_affinity` | Warn: an interrupt set up later (a hotplugged camera) starts there |
 | `irqbalance` | a running `irqbalance` | Warn: it rewrites interrupt affinity about every 10 s |
 | `cpu-idle` | `cpuidle/stateN/{latency,disable}`, `power/pm_qos_resume_latency_us` | Warn: an allowed idle state exits slower than 50 us |
-| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | Warn: unbound kernel work runs there |
-| `kthread-affinity` | kernel threads allowed on more than one cpu | Warn: one may run there |
-| `smt` | `topology/thread_siblings_list` | Warn: an SMT sibling is not isolated |
-| `cpu-capacity` | `cpu_capacity` | Warn: a lower-capacity core (an efficiency core) |
-| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | Warn: the 4 s softlockup timer runs there |
+| `workqueue` | `/sys/devices/virtual/workqueue/cpumask` | Warn for a hard stage, Info for a soft one: unbound kernel work runs there |
+| `kthread-affinity` | kernel threads allowed on more than one cpu | Warn for a hard stage, Info for a soft one: one may run there |
+| `smt` | `topology/thread_siblings_list` | Warn for a hard stage, Info for a soft one: an SMT sibling is not isolated |
+| `cpu-capacity` | `cpu_capacity` | Info: a lower-capacity core (an efficiency core) |
+| `softlockup-watchdog` | `kernel.watchdog`, `kernel.watchdog_cpumask` | Warn for a hard stage, Info for a soft one: the 4 s softlockup timer runs there |
 | `kernel-preemption` | `/sys/kernel/realtime`, `/proc/version` | Warn: not PREEMPT_RT |
 | `preempt-mode` | `/proc/version`, debugfs `sched/preempt` | Warn: `none` or `voluntary`, and `lazy` for a stage that is not RT. Unknown when debugfs cannot be read |
 | `sched-ext` | `/sys/kernel/sched_ext/state` | Warn: a BPF scheduler runs this stage or its reset children |
-| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: `always` |
-| `compaction` | `vm.compact_unevictable_allowed` | Warn: 1, so compaction moves mlocked pages |
-| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Warn: on, with two or more nodes |
-| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Warn: ratio limits; a writer past them sleeps |
-| `audit` | `audit=` on the boot line, `auditd` | Warn: audit is on. Unknown when neither says |
-| `console` | `/proc/consoles`, `kernel.printk` | Warn: a serial console on a kernel that is not PREEMPT_RT |
-| `clocksource` | `current_clocksource` | Warn: not `tsc`, `arch_sys_counter` or `kvm-clock`, so `clock_gettime` leaves the vDSO |
-| `virtualization` | the `hypervisor` cpu flag, `/sys/hypervisor` | Warn: a virtual machine; its latency says nothing about bare metal |
-| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Warn: something can change clocks or online cpus after preflight |
+| `thp` | `transparent_hugepage/{enabled,defrag}` | Warn: defrag `always`, which compacts in the fault path. Info: enabled `always` |
+| `compaction` | `vm.compact_unevictable_allowed` | Info: 1, so compaction moves mlocked pages |
+| `numa-balancing` | `node/online`, `kernel.numa_balancing` | Info: on, with two or more nodes |
+| `dirty-limits` | `vm.dirty_bytes`, `vm.dirty_ratio`, `MemTotal` | Info: ratio limits; a writer past them sleeps |
+| `audit` | `audit=` on the boot line, `auditd` | Info: audit is on. Unknown when neither says |
+| `console` | `/proc/consoles`, `kernel.printk` | Info: a serial console on a kernel that is not PREEMPT_RT |
+| `clocksource` | `current_clocksource` | Warn: `hpet` or `acpi_pm`, about a microsecond a read. Info: another clocksource that is not `tsc`, `arch_sys_counter` or `kvm-clock` |
+| `virtualization` | the `hypervisor` cpu flag, `/sys/hypervisor` | Info: a virtual machine; its latency says nothing about bare metal |
+| `power-policy` | `power-profiles-daemon`, `tuned`, `thermald`, `platform_profile`, `/etc/nvpmodel.conf` | Info: something can change clocks or online cpus after preflight |
 | `memory-lock` | `VmLck` in `/proc/<pid>/status` | Warn: no locked memory; a page fault is an unbounded stall |
 | `cgroup-cpu` | `cpu.max` up the cgroup | Warn: a quota while SCHED_OTHER threads (the stage, or its reset children) run there |
-| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Warn: `memory.high` is set, or oomd runs |
+| `cgroup-memory` | `memory.high`, `memory.max`, `memory.swap.max`, `systemd-oomd` | Info: `memory.high` is set, or oomd runs |
 | `secure-exec` | `AT_SECURE` in `/proc/<pid>/auxv` | Warn: ld.so dropped `LD_PRELOAD` (section 10) |
-| `bind-now` | `LD_BIND_NOW` in the environment, `BIND_NOW` of every mapped object | Warn: an object binds lazily (section 10) |
+| `bind-now` | `LD_BIND_NOW` in the environment, `BIND_NOW` of every mapped object | Info: an object binds lazily (section 10) |
 
 `preflight(spec)` judges what no single stage can see: the file as a whole on this host. It runs nothing at bind; `cyra check` and `cyra status` print it.
 
-| id | Fail / Warn |
+| id | Fail / Warn / Info |
 | --- | --- |
 | `housekeeping` | Fail: isolated cpus and the cpus of hard RT workers cover every online cpu |
 | `foreign-rt-thread` | Warn, per stage: a SCHED_FIFO or SCHED_RR thread the file does not declare may run on the stage's cpus at or above its priority. Kernel and interrupt threads count; `migration/N` does not. Declared means it holds a stage, a `match` names it, it runs at an external stage's `expect_priority`, or it is a child of an inherit stage |
 | `deadline-task` | Warn: a SCHED_DEADLINE task may run on a stage cpu. It runs above every FIFO stage. `sugov:N` is schedutil's |
 | `nohz-single-task` | Warn: two stages on one `nohz_full` cpu, where the tick stops only with one runnable task |
 | `smt-neighbor` | Warn: two hard RT workers on SMT siblings of one core |
-| `llc-handoff` | Ok, for information: adjacent stages of a chain whose cpus share no last-level cache (`cache/index3`, else cpufreq `related_cpus`) |
+| `llc-handoff` | Info: adjacent stages of a chain whose cpus share no last-level cache (`cache/index3`, else cpufreq `related_cpus`) |
 | `taint` | Warn: the kernel is tainted W (a warning fired) or L (a soft lockup) |
 
 `verify(stage, tid)` applies nothing. `chrt`, systemd, or a later apply can move a thread after cyra set it; this is how that is seen.
@@ -375,7 +377,7 @@ On PREEMPT_RT a timer expires in one of two contexts. The nanosleep, futex and e
 
 | Band | For |
 | --- | --- |
-| 99 | The kernel's watchdog and stopper work. No stage (`priority-band` Warns) |
+| 99 | The kernel's watchdog and stopper work. No stage (`priority-band` notes it) |
 | 85..94 | Interrupt threads that feed RT stages |
 | 80..89 | The main RT stages |
 | 50..79 | Other interrupt threads (the kernel starts them at 50) |
