@@ -21,6 +21,8 @@ The API is in [`docs/en/api.en.md`](docs/en/api.en.md) ([Korean](docs/ko/api.ko.
 
 ## Build
 
+cyra supports ROS 2 Humble and Jazzy.
+
 ```bash
 git submodule update --init          # thirdparty/nanobind
 source /opt/ros/jazzy/setup.bash
