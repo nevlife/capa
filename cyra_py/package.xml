@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>
     cyra Python binding (nanobind): thread scheduling for the calling thread and the chain
-    declaration file, plus cyra.flux for flux.ros.PartitionedExecutor threads.
+    declaration file, plus cyra.flux for flux.PartitionedExecutor threads.
   </description>
   <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
   <license>MIT</license>
@@ -18,7 +18,6 @@
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>flux_py</test_depend>
-  <test_depend>flux2_py</test_depend>
   <test_depend>python3-numpy</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>rclpy</test_depend>

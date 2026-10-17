@@ -1,6 +1,6 @@
 #include "cyra/flux.hpp"
-#include "flux/ros/partitioned_executor.hpp"
-#include "flux/ros/subscription.hpp"
+#include "flux/partitioned_executor.hpp"
+#include "flux/subscription.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -28,7 +28,7 @@ public:
   }
 
   rclcpp::CallbackGroup::SharedPtr group() { return group_; }
-  flux::ros::Subscription & subscription() { return sub_; }
+  flux::Subscription & subscription() { return sub_; }
 
   static constexpr const char * kGroupLabel = "work";
 
@@ -53,7 +53,7 @@ private:
   }
 
   rclcpp::CallbackGroup::SharedPtr group_;
-  flux::ros::Subscription sub_;
+  flux::Subscription sub_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::uint64_t seen_ = 0;
 };
@@ -65,8 +65,8 @@ int main(int argc, char ** argv)
   try {
     auto node = std::make_shared<StageNode>();
 
-    flux::ros::PartitionedExecutor ex;
-    ex.add_ros_node(node);
+    flux::PartitionedExecutor ex;
+    ex.add_node(node);
     ex.add(node->subscription(), node->group());
 
     // The whole schedule of this thread is in the file CYRA_SPEC names; the code only says which

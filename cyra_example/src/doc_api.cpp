@@ -1,6 +1,6 @@
 #include "cyra/flux.hpp"
 #include "cyra/spec.hpp"
-#include "flux/ros/partitioned_executor.hpp"
+#include "flux/partitioned_executor.hpp"
 
 #include <chrono>
 #include <string>
@@ -46,7 +46,7 @@ void doc_check(const cyra::Spec & spec, const cyra::Stage & stage, const cyra::O
 }
 
 void doc_flux(
-  flux::ros::PartitionedExecutor & ex, const rclcpp::Node::SharedPtr & node,
+  flux::PartitionedExecutor & ex, const rclcpp::Node::SharedPtr & node,
   const rclcpp::CallbackGroup::SharedPtr & grab_group,
   const rclcpp::CallbackGroup::SharedPtr & infer_group,
   const rclcpp::CallbackGroup::SharedPtr & loop_group, const cyra::Options & opts,

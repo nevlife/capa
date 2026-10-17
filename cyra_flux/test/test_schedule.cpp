@@ -1,6 +1,6 @@
 #include "cyra/flux.hpp"
 
-#include <flux/ros/partitioned_executor.hpp>
+#include <flux/partitioned_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <std_msgs/msg/u_int64.hpp>
@@ -45,14 +45,13 @@ TEST(Schedule, ScheduleReachesTheChildThread)
     },
     opts);
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(sub_node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(sub_node);
   cyra::Options sched;
   sched.cpus = {0};
   cyra::flux::apply_checked(ex, *sub_node, g, sched);
 
-  std::atomic<bool> run{true};
-  std::thread spinner([&] { ex.spin(run, 20'000'000); });
+  std::thread spinner([&] { ex.spin(); });
 
   const auto deadline = std::chrono::steady_clock::now() + 5s;
   std_msgs::msg::UInt64 m;
@@ -61,8 +60,7 @@ TEST(Schedule, ScheduleReachesTheChildThread)
     std::this_thread::sleep_for(2ms);
   }
 
-  run.store(false);
-  ex.stop();
+  ex.cancel();
   spinner.join();
   rclcpp::shutdown();
 
@@ -101,29 +99,27 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
     },
     opts);
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(sub_node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(sub_node);
   cyra::flux::apply_checked(ex, *sub_node, g, sched);
 
-  std::atomic<bool> run{true};
   if (perm->verdict != cyra::Verdict::Ok) {
     // std::runtime_error, not system_error: the child goes through cyra::apply_checked, so the
     // refusal now comes from preflight before the thread is touched rather than from the
     // syscall afterwards. system_error derives from runtime_error, so this covers both.
-    EXPECT_THROW(ex.spin(run, 20'000'000), std::runtime_error);
+    EXPECT_THROW(ex.spin(), std::runtime_error);
     rclcpp::shutdown();
     return;
   }
 
-  std::thread spinner([&] { ex.spin(run, 20'000'000); });
+  std::thread spinner([&] { ex.spin(); });
   const auto deadline = std::chrono::steady_clock::now() + 5s;
   std_msgs::msg::UInt64 m;
   while (!seen.load() && std::chrono::steady_clock::now() < deadline) {
     ros_pub->publish(m);
     std::this_thread::sleep_for(2ms);
   }
-  run.store(false);
-  ex.stop();
+  ex.cancel();
   spinner.join();
   rclcpp::shutdown();
 
@@ -140,8 +136,8 @@ TEST(Schedule, ScheduleRejects)
   auto node = std::make_shared<rclcpp::Node>("cie_sched_reject");
   auto other = std::make_shared<rclcpp::Node>("cie_sched_other");
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(node);
 
   auto foreign = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   EXPECT_THROW(
@@ -168,16 +164,14 @@ TEST(Schedule, ScheduleRejects)
   auto stray_node = std::make_shared<rclcpp::Node>("cie_sched_stray");
   auto stray = stray_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   cyra::flux::apply_checked(ex, *stray_node, stray, cyra::Options{});
-  std::atomic<bool> run{true};
-  EXPECT_THROW(ex.spin(run, 20'000'000), std::invalid_argument);
+  EXPECT_THROW(ex.spin(), std::invalid_argument);
 
-  flux::ros::PartitionedExecutor ex2;
-  ex2.add_ros_node(node);
-  std::thread spinner([&] { ex2.spin(run, 20'000'000); });
+  flux::PartitionedExecutor ex2;
+  ex2.add_node(node);
+  std::thread spinner([&] { ex2.spin(); });
   std::this_thread::sleep_for(100ms);
   EXPECT_THROW(cyra::flux::apply_checked(ex2, *node, g, cyra::Options{}), std::logic_error);
-  run.store(false);
-  ex2.stop();
+  ex2.cancel();
   spinner.join();
   rclcpp::shutdown();
 }
@@ -201,13 +195,12 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
     GTEST_SKIP() << "cyra-cap:rt-warn-verdict this host has no Warn-only verdict to strengthen";
   }
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(node);
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   cyra::flux::apply_checked(ex, *node, g, opts, cyra::Strictness::Hard);
 
-  std::atomic<bool> run{true};
-  EXPECT_THROW(ex.spin(run, 20'000'000), std::runtime_error);
+  EXPECT_THROW(ex.spin(), std::runtime_error);
 
   rclcpp::shutdown();
 }
@@ -279,7 +272,7 @@ TEST(ScheduleStage, RejectsAStageWhoseNodeIsNotTheNodeHandedOver)
   const auto spec = cyra::Spec::load(f.path());
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  flux::ros::PartitionedExecutor ex;
+  flux::PartitionedExecutor ex;
   const std::string why =
     refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
@@ -296,7 +289,7 @@ TEST(ScheduleStage, RejectsAGroupOfAnotherNode)
   const auto spec = cyra::Spec::load(f.path());
 
   auto g = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  flux::ros::PartitionedExecutor ex;
+  flux::PartitionedExecutor ex;
   const std::string why =
     refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer")); });
   rclcpp::shutdown();
@@ -311,7 +304,7 @@ TEST(ScheduleStage, RejectsALabelledStageOnTheDefaultGroup)
   SpecFile f(kLabelSpec);
   const auto spec = cyra::Spec::load(f.path());
 
-  flux::ros::PartitionedExecutor ex;
+  flux::PartitionedExecutor ex;
   const std::string why = refusal([&] {
     cyra::flux::apply_checked(
       ex, *node, node->get_node_base_interface()->get_default_callback_group(),
@@ -330,7 +323,7 @@ TEST(ScheduleStage, RejectsAnUnlabelledStageOnANamedGroup)
   const auto spec = cyra::Spec::load(f.path());
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  flux::ros::PartitionedExecutor ex;
+  flux::PartitionedExecutor ex;
   const std::string why =
     refusal([&] { cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
@@ -346,14 +339,13 @@ TEST(ScheduleStage, AcceptsAStageOnTheGroupItNames)
   const auto spec = cyra::Spec::load(f.path());
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(node);
   cyra::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer"));
 
-  std::atomic<bool> run{true};
-  std::thread spinner([&] { ex.spin(run, 20'000'000); });
+  std::thread spinner([&] { ex.spin(); });
   std::this_thread::sleep_for(100ms);
-  ex.stop();
+  ex.cancel();
   spinner.join();
   rclcpp::shutdown();
 }
@@ -369,14 +361,13 @@ TEST(ScheduleStage, RejectsOneStageOnTwoGroups)
 
   auto ga = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   auto gb = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(node);
   const auto & stage = *spec.find("/cie_label", "infer");
   cyra::flux::apply_checked(ex, *node, ga, stage);
   cyra::flux::apply_checked(ex, *node, gb, stage);
 
-  std::atomic<bool> run{true};
-  const std::string why = refusal([&] { ex.spin(run, 20'000'000); });
+  const std::string why = refusal([&] { ex.spin(); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("one stage declares one thread"), std::string::npos) << why;

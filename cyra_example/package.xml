@@ -17,7 +17,8 @@
   <depend>cyra_core</depend>
   <depend>cyra_flux</depend>
   <depend>flux_cpp</depend>
-  <depend>flux_example_msgs</depend>
+  <depend>flux_std_adapters</depend>
+  <depend>sensor_msgs</depend>
   <depend>rclcpp</depend>
 
   <export>

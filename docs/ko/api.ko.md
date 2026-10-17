@@ -5,7 +5,7 @@ cyra는 데이터 경로 위 스레드의 OS 스케줄링(정책·우선순위·
 | 패키지 | 내용 | 의존 |
 | --- | --- | --- |
 | `cyra_core` | C++17, ROS 미사용. 체인 파일, 적용, 호스트 preflight, 되읽기, 확인 | yaml-cpp |
-| `cyra_flux` | flux나 flux2 `PartitionedExecutor` 스레드용으로 같은 함수 | `cyra_core` |
+| `cyra_flux` | flux `PartitionedExecutor` 스레드용으로 같은 함수 | `cyra_core` |
 | `cyra_py` | Python. `cyra`(`cyra_core`의 이름)와 `cyra.flux`(`cyra_flux`의 이름) | `cyra_core` |
 
 C++와 Python은 이름, 인자 순서, 기본값이 같다. 다른 곳은 언어가 강제하는 곳뿐이고 7절에 모았다.
@@ -30,7 +30,7 @@ chains:
 | --- | --- | --- |
 | 새로 만드는 스레드 | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
 | 이미 도는 스레드(main, 직접 가진 스레드) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
-| flux나 flux2 `PartitionedExecutor` 그룹 스레드 | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+| flux `PartitionedExecutor` 그룹 스레드 | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
 
 - `bind(target, group="")`는 호출한 스레드를 그 stage에 걸고, 호스트를 판정하고, 커널에서 되읽는다. `target`은 노드의 전체 이름(`get_fully_qualified_name()`)과 그룹 라벨, 또는 `name` stage의 이름(그룹 없이)이다.
 - `spawn(target, group, fn)`은 스레드를 만들어 bind하고 그 뒤에 `fn`을 돌린다. 스레드가 걸린 뒤에 반환한다. bind가 거절되면 `fn`은 돌지 않고 거절이 호출자에게 던져진다. 스레드 안에서 `bind`를 부르는 방식보다 이것을 쓴다. 그 방식은 `bind` 줄에 닿을 때까지 스케줄 없이 돈다.
@@ -262,7 +262,7 @@ stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bi
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::ros::PartitionedExecutor`와 `flux2::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `cyra_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자이고, 이 두 타입 중 하나다. `cyra_flux`는 둘 다 링크하지 않으므로 executor의 헤더는 직접 include한다.
+`flux::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `cyra_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자다. `cyra_flux`는 flux를 링크하지 않으므로 executor의 헤더는 직접 include한다.
 
 함수는 `cyra/flux.hpp`에 있다. 그룹당 선언이 하나라서 아래 세 형태는 서로 다른 그룹에 건다.
 
@@ -311,7 +311,7 @@ Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 
 | --- | --- |
 | `spawn`이 C++에서는 `std::thread`, Python에서는 시작된 `threading.Thread`를 준다 | Python 함수는 Python이 시작한 스레드에서 돌아야 한다 |
 | `cyra.flux`는 `group`이 `node`의 것인지 확인하지 않는다 | flux Python 그룹은 자기 노드를 모른다. stage의 노드는 `node`와 대조한다 |
-| `cyra.flux`에서 `group=None`은 노드 단위(`add_ros_node`, flux2는 `add_node`에 준 노드) | rclpy는 단위를 그룹과 노드로 나눈다. C++에는 그룹만 있다 |
+| `cyra.flux`에서 `group=None`은 노드 단위(`add_node`에 준 노드) | rclpy는 단위를 그룹과 노드로 나눈다. C++에는 그룹만 있다 |
 | `cyra.flux.apply_checked`는 함수 하나가 `Options`와 `Stage`를 다 받는다 | Python에는 overload가 없다 |
 
 `cyra_py/test/test_surface.py`는 공개 이름이 한쪽에만 있으면 실패한다.
@@ -326,7 +326,7 @@ Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 
 
 ## 9. flux와의 연결
 
-`cyra_flux`와 `cyra.flux`는 flux나 flux2 executor의 `on_thread_start` hook을 등록한다. executor를 템플릿 인자(C++)나 아무 객체(Python)로 받으므로 둘 다 링크하지 않는다. flux와 flux2는 cyra를 모르고 `cyra_core`는 둘 다에 의존하지 않는다. hook, 템플릿, 패키지 구성은 언제든 바뀔 수 있고, `cyra_flux`와 `cyra.flux` 밖의 코드는 여기에 기대지 않는다.
+`cyra_flux`와 `cyra.flux`는 flux executor의 `on_thread_start` hook을 등록한다. executor를 템플릿 인자(C++)나 아무 객체(Python)로 받으므로 flux를 링크하지 않는다. flux는 cyra를 모르고 `cyra_core`는 flux에 의존하지 않는다. hook, 템플릿, 패키지 구성은 언제든 바뀔 수 있고, `cyra_flux`와 `cyra.flux` 밖의 코드는 여기에 기대지 않는다.
 
 ## 10. Linux에서 RT 스레드 돌리기
 
@@ -336,13 +336,13 @@ Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 
 
 다른 스레드를 기다리는 스레드는 그 스레드의 스케줄 위치를 물려받는다. lock이면 PI mutex가 쥔 쪽에 기다리는 쪽의 우선순위를 준다. 일을 넘겨받는 대기(futex 워드, eventfd, condition)는 쥔 것이 없으니 아무도 boost되지 않는다. 기다리는 쪽은 넘겨주는 스레드보다 먼저 돌 수 없다. 넘겨주는 스레드를 체인의 `release` stage로 선언하고, RT로 기다리는 쪽보다 위에 둔다. nice만 올리는 것(`WQ_HIGHPRI` workqueue는 nice -20)으로는 부족하다. 그 CPU의 RT 스레드가 여전히 먼저 돈다.
 
-flux2를 쓰는 프로세스에는 이런 스레드가 셋 있고, GPU가 있으면 드라이버 인터럽트 스레드가 더해진다.
+flux를 쓰는 프로세스에는 이런 스레드가 셋 있고, GPU가 있으면 드라이버 인터럽트 스레드가 더해진다.
 
 | 스레드 | 풀어 주는 것 | 선언 |
 | --- | --- | --- |
-| `flux2-parker` | 구독한 입력이 도착했을 때 executor의 대기 | `match: {process: <comm>, thread: flux2-parker}` |
-| `flux2-gpu-wait` | Deferred release 모드에서 GPU fence가 signal된 loan | `match: {process: <comm>, thread: flux2-gpu-wait}` |
-| `flux2-gpu-fd` | dGPU publisher에 대한 subscriber의 attach(fd 교환) | 체인이 도는 동안 attach가 일어날 때만 |
+| `flux-parker` | 구독한 입력이 도착했을 때 executor의 대기 | `match: {process: <comm>, thread: flux-parker}` |
+| `flux-gpu-wait` | Deferred release 모드에서 GPU fence가 signal된 loan | `match: {process: <comm>, thread: flux-gpu-wait}` |
+| `flux-gpu-fd` | dGPU publisher에 대한 subscriber의 attach(fd 교환) | 체인이 도는 동안 attach가 일어날 때만 |
 | GPU 드라이버의 인터럽트 스레드 | 그 GPU의 모든 fence 대기(PREEMPT_RT나 `threadirqs`에서 스레드가 된다) | `match: {irq: <handler>}`, 이름은 `/sys/kernel/irq/<n>/actions`의 것 |
 
 ```yaml
@@ -359,7 +359,7 @@ chains:
         kind: release
         policy: fifo
         priority: 86
-        match: {process: perception, thread: flux2-parker}
+        match: {process: perception, thread: flux-parker}
       - node: /perception_node
         group: infer
         policy: fifo

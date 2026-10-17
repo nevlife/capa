@@ -1,6 +1,6 @@
 #include "cyra/flux.hpp"
 
-#include <flux/ros/partitioned_executor.hpp>
+#include <flux/partitioned_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <std_msgs/msg/u_int64.hpp>
@@ -112,7 +112,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
   stages[2].node = std::make_shared<rclcpp::Node>("rtchain_control");
   stages[2].label = "loop";
 
-  flux::ros::PartitionedExecutor ex;
+  flux::PartitionedExecutor ex;
   for (Stage & s : stages) {
     s.group = s.node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     rclcpp::SubscriptionOptions opts;
@@ -123,7 +123,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
         if (!s.seen.exchange(true)) s.observed = cyra::current();
       },
       opts);
-    ex.add_ros_node(s.node);
+    ex.add_node(s.node);
     // The call under test: the file names the stage, and nothing about its scheduling is here.
     cyra::flux::bind(ex, *s.node, s.group, s.label);
   }
@@ -132,16 +132,15 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
   const cyra::Finding * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
 
-  std::atomic<bool> run{true};
   if (perm->verdict != cyra::Verdict::Ok) {
     // The declaration must fail loudly rather than leave the chain running at default priority.
-    EXPECT_THROW(ex.spin(run, 20'000'000), std::runtime_error);
+    EXPECT_THROW(ex.spin(), std::runtime_error);
     rclcpp::shutdown();
     ::unsetenv("CYRA_SPEC");
     return;
   }
 
-  std::thread spinner([&] { ex.spin(run, 20'000'000); });
+  std::thread spinner([&] { ex.spin(); });
   const auto deadline = std::chrono::steady_clock::now() + 5s;
   std_msgs::msg::UInt64 m;
   while (std::chrono::steady_clock::now() < deadline) {
@@ -149,8 +148,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
     pub->publish(m);
     std::this_thread::sleep_for(2ms);
   }
-  run.store(false);
-  ex.stop();
+  ex.cancel();
   spinner.join();
   rclcpp::shutdown();
   ::unsetenv("CYRA_SPEC");
@@ -560,8 +558,8 @@ chains:
   auto node = std::make_shared<rclcpp::Node>("rtchain_ext");
   auto group = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
-  flux::ros::PartitionedExecutor ex;
-  ex.add_ros_node(node);
+  flux::PartitionedExecutor ex;
+  ex.add_node(node);
   const cyra::Stage & ext = spec.stage(node->get_fully_qualified_name(), "dds_listener");
   EXPECT_THROW(cyra::flux::apply_checked(ex, *node, group, ext), std::invalid_argument);
   EXPECT_THROW(cyra::apply_checked(ext), std::invalid_argument);

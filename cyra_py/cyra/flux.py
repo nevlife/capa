@@ -1,7 +1,7 @@
 """The cyra functions of the same name, run by the PartitionedExecutor child serving the unit.
 
-`ex` is a flux.ros.PartitionedExecutor or a flux2.PartitionedExecutor. A flux Python group does
-not know its node, so whether `group` belongs to `node` is not checked."""
+`ex` is a flux.PartitionedExecutor. A flux Python group does not know its node, so whether
+`group` belongs to `node` is not checked."""
 
 from ._cyra import Options, Spec, Stage, Strictness, apply_checked as _apply_checked
 

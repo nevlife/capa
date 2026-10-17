@@ -5,7 +5,7 @@ cyra sets and checks the OS scheduling of the threads on a dataflow path: policy
 | Package | Contents | Depends on |
 | --- | --- | --- |
 | `cyra_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
-| `cyra_flux` | The same functions for the threads of a flux or flux2 `PartitionedExecutor` | `cyra_core` |
+| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core` |
 | `cyra_py` | Python: `cyra` (the `cyra_core` names) and `cyra.flux` (the `cyra_flux` names) | `cyra_core` |
 
 C++ and Python have the same names, the same arguments in the same order, and the same defaults. The differences are only where a language forces one, and are listed in section 7.
@@ -30,7 +30,7 @@ A thread then says which stage it is. Which call depends on who created the thre
 | --- | --- | --- |
 | One you start | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
 | One that already runs (main, a thread you own) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
-| A flux or flux2 `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+| A flux `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
 
 - `bind(target, group="")` puts the calling thread on the stage, checks the host, and reads the result back from the kernel. `target` is a fully-qualified node name (`get_fully_qualified_name()`) with the group label, or a `name` stage's name with no group.
 - `spawn(target, group, fn)` starts a thread, binds it, and only then runs `fn`. It returns once the thread is set. If the bind is refused, `fn` never runs and the refusal is thrown to the caller. Prefer it over a thread that calls `bind` itself: that thread runs unscheduled until it reaches the `bind` line.
@@ -262,7 +262,7 @@ A record carries its length and a checksum, so one read in the middle of its rew
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::ros::PartitionedExecutor` and `flux2::PartitionedExecutor` give each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter, and it is one of these two types. `cyra_flux` links neither, so include the executor's own header.
+`flux::PartitionedExecutor` gives each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter. `cyra_flux` does not link flux, so include the executor's own header.
 
 The functions are in `cyra/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
 
@@ -311,7 +311,7 @@ Python is not an RT target. Whatever priority a thread holds, the GIL and GC sta
 | --- | --- |
 | `spawn` returns `std::thread` in C++ and a started `threading.Thread` in Python | A Python function has to run on a thread Python started |
 | `cyra.flux` does not check that `group` belongs to `node` | A flux Python group does not know its node. The stage's node is still checked against `node` |
-| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_ros_node`, or `add_node` in flux2) | rclpy splits the unit into groups and nodes; C++ has only groups |
+| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_node`) | rclpy splits the unit into groups and nodes; C++ has only groups |
 | `cyra.flux.apply_checked` takes `Options` or a `Stage` in one function | Python has no overloads |
 
 `cyra_py/test/test_surface.py` fails when a public name exists on one side only.
@@ -326,7 +326,7 @@ Python is not an RT target. Whatever priority a thread holds, the GIL and GC sta
 
 ## 9. The connection to flux
 
-`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a flux or flux2 executor, which they take as a template parameter (C++) or any object (Python), linking neither. flux and flux2 know nothing about cyra, and `cyra_core` depends on neither. The hook, the template, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.
+`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a flux executor, which they take as a template parameter (C++) or any object (Python), without linking flux. flux knows nothing about cyra, and `cyra_core` does not depend on flux. The hook, the template, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.
 
 ## 10. Running RT threads on Linux
 
@@ -336,13 +336,13 @@ The file checks priorities against each other. These rules are about what a prio
 
 A thread that waits on another inherits that thread's place in the schedule. For a lock, a PI mutex hands the holder the waiter's priority. A wait for another thread to hand work over (a futex word, an eventfd, a condition) holds nothing, so nothing is boosted: the waiter runs no sooner than the thread that releases it. Declare the releasing thread a `release` stage of the chain, RT and above the waiter. Raising its nice value (a `WQ_HIGHPRI` workqueue is nice -20) is not enough: any RT thread on that cpu still runs first.
 
-flux2 has three such threads in a process that uses it, and a GPU adds the driver's interrupt thread.
+flux has three such threads in a process that uses it, and a GPU adds the driver's interrupt thread.
 
 | Thread | Releases | Declare |
 | --- | --- | --- |
-| `flux2-parker` | The executor wait, when a subscribed input arrives | `match: {process: <comm>, thread: flux2-parker}` |
-| `flux2-gpu-wait` | A loan in Deferred release mode, once its GPU fence signals | `match: {process: <comm>, thread: flux2-gpu-wait}` |
-| `flux2-gpu-fd` | A subscriber's attach to a dGPU publisher (the fd exchange) | Only when attaches happen while the chain runs |
+| `flux-parker` | The executor wait, when a subscribed input arrives | `match: {process: <comm>, thread: flux-parker}` |
+| `flux-gpu-wait` | A loan in Deferred release mode, once its GPU fence signals | `match: {process: <comm>, thread: flux-gpu-wait}` |
+| `flux-gpu-fd` | A subscriber's attach to a dGPU publisher (the fd exchange) | Only when attaches happen while the chain runs |
 | The GPU driver's interrupt thread | Every fence wait on that GPU (threaded on PREEMPT_RT or with `threadirqs`) | `match: {irq: <handler>}`, the name in `/sys/kernel/irq/<n>/actions` |
 
 ```yaml
@@ -359,7 +359,7 @@ chains:
         kind: release
         policy: fifo
         priority: 86
-        match: {process: perception, thread: flux2-parker}
+        match: {process: perception, thread: flux-parker}
       - node: /perception_node
         group: infer
         policy: fifo

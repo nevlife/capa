@@ -28,7 +28,6 @@ A new promise gets a row before it gets a claim in a user document.
 | X-018 | A granted RT policy reaches the flux child thread | `Schedule.ScheduleFifoMatchesPreflight` | `test_a_granted_policy_reaches_the_child` |
 | X-019 | Another process sees which thread holds a stage, until the holder exits | `Record.AnotherProcessSeesTheStageAThreadHolds` | `test_another_process_sees_the_stage_a_thread_holds` |
 | X-020 | A stage the daemon matches is refused by apply_checked and bind | `Bind.AMatchedStageIsRefused` | `test_a_matched_stage_is_refused` |
-| X-021 | flux bind reaches the group child of a flux2 executor as well | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 | X-022 | preflight of a whole file fails it when its hard stages and the isolated cpus leave no housekeeping cpu | `Hosts.HousekeepingFailsWhenNothingIsLeft` | `test_preflight_of_a_file_fails_a_host_left_without_housekeeping` |
 | X-023 | verify with a window adds the thread's and its cpus' counters, and without one reads none | `Verify.AWindowReadsTheThreadsAndItsCpusCounters` | `test_verify_with_a_window_reads_counters` |
 | X-024 | An Info finding never refuses an apply; on a stock host a hard request is refused only for findings that move latency | `Hosts.AStockHostRefusesAHardChainOnlyForLatencyFindings` | `test_informational_findings_never_block_a_hard_request` |
@@ -41,5 +40,5 @@ A side may be `-` here, never both. The reasons are in `api.en.md` section 7.
 | --- | --- | --- | --- |
 | S-001 | spawn returns std::thread in C++ and a started threading.Thread in Python | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
 | S-002 | Only C++ checks that the group belongs to the node | `ScheduleStage.RejectsAGroupOfAnotherNode` | - |
-| S-003 | In Python, group=None is the node's unit (a node given to add_ros_node) | - | `test_a_node_child_runs_where_it_was_declared` |
+| S-003 | In Python, group=None is the node's unit (a node given to add_node) | - | `test_a_node_child_runs_where_it_was_declared` |
 | S-004 | cyra.flux.apply_checked is one function taking Options or a Stage | - | `test_a_stage_reaches_the_group_child` |

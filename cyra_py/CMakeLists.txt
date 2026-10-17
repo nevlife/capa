@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(cyra_py VERSION 0.0.0 LANGUAGES CXX)
 
 # cyra_py is the nanobind Python binding over cyra_core, plus cyra.flux, the pure-Python adapter
-# for flux.ros.PartitionedExecutor and flux2.PartitionedExecutor. nanobind is vendored as a submodule at the repo root.
+# for flux.PartitionedExecutor. nanobind is vendored as a submodule at the repo root.
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
@@ -55,8 +55,6 @@ if(BUILD_TESTING)
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/run)
   ament_add_pytest_test(test_rt test/test_rt.py ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
   ament_add_pytest_test(test_flux test/test_flux.py ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
-  ament_add_pytest_test(test_flux2 test/test_flux2.py
-    ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
   ament_add_pytest_test(test_surface test/test_surface.py)
   ament_add_pytest_test(test_doc_examples test/test_doc_examples.py)
   # The repository checks that need no build, run here as well so colcon test holds them without

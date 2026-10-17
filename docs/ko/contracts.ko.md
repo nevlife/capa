@@ -28,7 +28,6 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 | X-018 | 허용된 RT 정책은 flux 자식 스레드에 도달한다 | `Schedule.ScheduleFifoMatchesPreflight` | `test_a_granted_policy_reaches_the_child` |
 | X-019 | 다른 프로세스는 어느 스레드가 stage를 쥐었는지 보고, 쥔 프로세스가 끝나면 사라진다 | `Record.AnotherProcessSeesTheStageAThreadHolds` | `test_another_process_sees_the_stage_a_thread_holds` |
 | X-020 | 데몬이 match하는 stage는 apply_checked와 bind가 거절한다 | `Bind.AMatchedStageIsRefused` | `test_a_matched_stage_is_refused` |
-| X-021 | flux bind는 flux2 executor의 그룹 자식 스레드에도 도달한다 | `Flux2.BindReachesTheGroupChild` | `test_flux2_bind_reaches_the_group_child` |
 | X-022 | 파일 전체의 preflight는 hard stage와 격리 CPU가 housekeeping CPU를 남기지 않으면 실패한다 | `Hosts.HousekeepingFailsWhenNothingIsLeft` | `test_preflight_of_a_file_fails_a_host_left_without_housekeeping` |
 | X-023 | window를 준 verify는 스레드와 그 CPU의 카운터를 더하고, 주지 않으면 읽지 않는다 | `Verify.AWindowReadsTheThreadsAndItsCpusCounters` | `test_verify_with_a_window_reads_counters` |
 | X-024 | Info finding은 적용을 막지 않는다. 일반 호스트에서 hard 요청은 지연에 영향을 주는 finding으로만 거절된다 | `Hosts.AStockHostRefusesAHardChainOnlyForLatencyFindings` | `test_informational_findings_never_block_a_hard_request` |
@@ -41,5 +40,5 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 | --- | --- | --- | --- |
 | S-001 | spawn은 C++에서 std::thread, Python에서 시작된 threading.Thread를 준다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
 | S-002 | 그룹이 노드의 것인지는 C++만 확인한다 | `ScheduleStage.RejectsAGroupOfAnotherNode` | - |
-| S-003 | Python에서 group=None은 노드 단위(add_ros_node에 준 노드) | - | `test_a_node_child_runs_where_it_was_declared` |
+| S-003 | Python에서 group=None은 노드 단위(add_node에 준 노드) | - | `test_a_node_child_runs_where_it_was_declared` |
 | S-004 | cyra.flux.apply_checked는 Options와 Stage를 함수 하나가 받는다 | - | `test_a_stage_reaches_the_group_child` |

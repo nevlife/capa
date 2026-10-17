@@ -9,8 +9,7 @@
 #include <string>
 
 // Each call is the cyra_core function of the same name, run by the child serving `group` before
-// its first callback. `Executor` is a flux::ros::PartitionedExecutor or a
-// flux2::PartitionedExecutor.
+// its first callback. `Executor` is a flux::PartitionedExecutor.
 
 namespace cyra::flux
 {

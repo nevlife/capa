@@ -1,4 +1,4 @@
-"""cyra.flux: scheduling for the threads of a flux.ros.PartitionedExecutor.
+"""cyra.flux: scheduling for the threads of a flux.PartitionedExecutor.
 
 Not real-time. What is checked is that a declared policy and cpu set reach the child thread that
 was supposed to get them, that a refusal arrives as the spin() error instead of as a thread running
@@ -18,8 +18,6 @@ rclpy = pytest.importorskip("rclpy")
 flux = pytest.importorskip("flux")
 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup  # noqa: E402
-
-import flux.ros  # noqa: E402
 
 import cyra  # noqa: E402
 import cyra.flux  # noqa: E402
@@ -51,8 +49,8 @@ def node():
     rclpy.try_shutdown()
 
 
-def spin_in_thread(ex, tick_ns=20_000_000):
-    t = threading.Thread(target=ex.spin, args=(tick_ns,), daemon=True)
+def spin_in_thread(ex):
+    t = threading.Thread(target=ex.spin, daemon=True)
     t.start()
     return t
 
@@ -62,13 +60,15 @@ def spin_in_thread(ex, tick_ns=20_000_000):
 @needs_two_cpus
 def test_a_group_child_runs_where_it_was_declared(node):
     target = spare_cpus[-1]
-    pub = flux.Publisher("/pytest/rt/g", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/g", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/g", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(
+        node, "/pytest/rt/g", callback=lambda _v: seen.append(cyra.current().cpus), fingerprint=FP
+    )
     group = MutuallyExclusiveCallbackGroup()
     seen = []
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
     cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[target]))
 
     t = spin_in_thread(ex)
@@ -107,13 +107,18 @@ def _spec_file(tmp_path, cpu):
 def test_a_stage_reaches_the_group_child(node, tmp_path):
     target = spare_cpus[-1]
     spec = cyra.Spec.load(_spec_file(tmp_path, target))
-    pub = flux.Publisher("/pytest/rt/stage", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/stage", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/stage", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(
+        node,
+        "/pytest/rt/stage",
+        callback=lambda _v: seen.append(cyra.current().cpus),
+        fingerprint=FP,
+    )
     group = MutuallyExclusiveCallbackGroup()
     seen = []
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
     cyra.flux.apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), "infer"))
 
     t = spin_in_thread(ex)
@@ -137,8 +142,8 @@ def test_a_node_child_runs_where_it_was_declared(node):
     seen = []
     node.create_timer(0.01, lambda: seen.append(cyra.current().cpus))
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add_ros_node(node)
+    ex = flux.PartitionedExecutor()
+    ex.add_node(node)
     cyra.flux.apply_checked(ex, node, None, cyra.Options(cpus=[target]))
 
     t = spin_in_thread(ex)
@@ -160,10 +165,9 @@ def test_two_groups_get_the_cpus_each_declared(node):
     left, right = spare_cpus[0], spare_cpus[-1]
     parent_before = cyra.current().cpus
     pubs = [
-        flux.Publisher(f"/pytest/rt/two{i}", slot_size=4096, slot_count=8, fingerprint=FP)
+        flux.Publisher(node, f"/pytest/rt/two{i}", fingerprint=FP, slot_size=4096, slot_count=8)
         for i in range(2)
     ]
-    subs = [flux.Subscription(f"/pytest/rt/two{i}", fingerprint=FP) for i in range(2)]
     groups = [MutuallyExclusiveCallbackGroup(), MutuallyExclusiveCallbackGroup()]
     seen = {}
     lock = threading.Lock()
@@ -175,9 +179,14 @@ def test_two_groups_get_the_cpus_each_declared(node):
 
         return cb
 
-    ex = flux.ros.PartitionedExecutor()
-    for index, (sub, group) in enumerate(zip(subs, groups)):
-        ex.add(sub, group, record(index))
+    subs = [
+        flux.Subscription(node, f"/pytest/rt/two{i}", callback=record(i), fingerprint=FP)
+        for i in range(2)
+    ]
+
+    ex = flux.PartitionedExecutor()
+    for sub, group in zip(subs, groups):
+        ex.add(sub, group)
     cyra.flux.apply_checked(ex, node, groups[0], cyra.Options(cpus=[left]))
     cyra.flux.apply_checked(ex, node, groups[1], cyra.Options(cpus=[right]))
 
@@ -198,36 +207,36 @@ def test_two_groups_get_the_cpus_each_declared(node):
 # A declaration for a unit no child serves would read as applied and never run. That is the
 # silent downgrade the surface exists to prevent, so spin() refuses it.
 def test_a_declaration_for_an_unserved_unit_is_refused(node):
-    ex = flux.ros.PartitionedExecutor()
+    ex = flux.PartitionedExecutor()
     cyra.flux.apply_checked(
         ex, node, MutuallyExclusiveCallbackGroup(), cyra.Options(cpus=[spare_cpus[0]])
     )
-    with pytest.raises(ValueError, match="does not serve"):
-        ex.spin(20_000_000)
+    with pytest.raises(ValueError, match="no thread serves"):
+        ex.spin()
 
 
 # Which of two declarations wins must never be a question of call order.
 def test_a_second_declaration_for_one_unit_is_refused(node):
-    ex = flux.ros.PartitionedExecutor()
+    ex = flux.PartitionedExecutor()
     group = MutuallyExclusiveCallbackGroup()
     cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
-    with pytest.raises(ValueError, match="already has an on_thread_start"):
+    with pytest.raises(ValueError, match="already has a thread-start hook"):
         cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
 
 
 def test_declaring_after_spin_started_is_refused(node):
-    pub = flux.Publisher("/pytest/rt/late", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/late", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/late", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(node, "/pytest/rt/late", callback=lambda _v: None, fingerprint=FP)
     group = MutuallyExclusiveCallbackGroup()
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: None)
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
 
     t = spin_in_thread(ex)
     try:
         deadline = time.monotonic() + 2.0
         while not ex._spinning and time.monotonic() < deadline:
             time.sleep(0.01)
-        with pytest.raises(RuntimeError, match="before spin"):
+        with pytest.raises(RuntimeError, match="while spinning"):
             cyra.flux.apply_checked(ex, node, group, cyra.Options(cpus=[spare_cpus[0]]))
     finally:
         ex.stop()
@@ -239,30 +248,34 @@ def test_declaring_after_spin_started_is_refused(node):
 # running callbacks at a priority nobody asked for is the outcome this rules out.
 @pytest.mark.skipif(rtprio_limit() >= 99, reason="this host grants any RT priority")
 def test_a_refused_policy_ends_the_spin_rather_than_running_anyway(node):
-    pub = flux.Publisher("/pytest/rt/deny", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/deny", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/deny", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(
+        node, "/pytest/rt/deny", callback=lambda _v: ran.append(1), fingerprint=FP
+    )
     group = MutuallyExclusiveCallbackGroup()
     ran = []
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: ran.append(1))
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
     cyra.flux.apply_checked(ex, node, group, cyra.Options(cyra.Policy.Fifo, 99))
 
     with pytest.raises((RuntimeError, OSError)):
-        ex.spin(20_000_000)
+        ex.spin()
     assert not ran
     del pub
 
 
 @needs_rtprio
 def test_a_granted_policy_reaches_the_child(node):
-    pub = flux.Publisher("/pytest/rt/fifo", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/fifo", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/fifo", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(
+        node, "/pytest/rt/fifo", callback=lambda _v: seen.append(cyra.current()), fingerprint=FP
+    )
     group = MutuallyExclusiveCallbackGroup()
     seen = []
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: seen.append(cyra.current()))
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
     cyra.flux.apply_checked(ex, node, group, cyra.Options(cyra.Policy.Fifo, 5))
 
     t = spin_in_thread(ex)
@@ -284,13 +297,18 @@ def test_a_granted_policy_reaches_the_child(node):
 def test_bind_reaches_the_group_child(node, tmp_path, monkeypatch):
     target = spare_cpus[-1]
     monkeypatch.setenv("CYRA_SPEC", _spec_file(tmp_path, target))
-    pub = flux.Publisher("/pytest/rt/bind", slot_size=4096, slot_count=8, fingerprint=FP)
-    sub = flux.Subscription("/pytest/rt/bind", fingerprint=FP)
+    pub = flux.Publisher(node, "/pytest/rt/bind", fingerprint=FP, slot_size=4096, slot_count=8)
+    sub = flux.Subscription(
+        node,
+        "/pytest/rt/bind",
+        callback=lambda _v: seen.append(cyra.current().cpus),
+        fingerprint=FP,
+    )
     group = MutuallyExclusiveCallbackGroup()
     seen = []
 
-    ex = flux.ros.PartitionedExecutor()
-    ex.add(sub, group, lambda _v: seen.append(cyra.current().cpus))
+    ex = flux.PartitionedExecutor()
+    ex.add(sub, group)
     with pytest.raises(RuntimeError, match="no stage"):
         cyra.flux.bind(ex, node, group, "infr")
     cyra.flux.bind(ex, node, group, "infer")
@@ -310,7 +328,7 @@ def test_bind_reaches_the_group_child(node, tmp_path, monkeypatch):
 
 def test_a_stage_must_name_the_node_and_its_unit(node, tmp_path):
     spec = cyra.Spec.load(_spec_file(tmp_path, spare_cpus[0]))
-    ex = flux.ros.PartitionedExecutor()
+    ex = flux.PartitionedExecutor()
     with pytest.raises(ValueError, match="but was handed node"):
         cyra.flux.apply_checked(ex, node, None, spec.stage("/control_node", "loop"))
     with pytest.raises(ValueError, match="default unit"):

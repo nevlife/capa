@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(cyra_flux VERSION 0.0.0 LANGUAGES CXX)
 
-# cyra_flux applies cyra declarations to the threads of a flux or flux2 PartitionedExecutor,
-# through the executor's on_thread_start() hook. It links neither; its tests use both.
+# cyra_flux applies cyra declarations to the threads of a flux PartitionedExecutor, through the
+# executor's on_thread_start() hook. It does not link flux; its tests do.
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
@@ -42,18 +42,12 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(std_msgs REQUIRED)
   find_package(flux_cpp REQUIRED)
-  find_package(flux2_cpp REQUIRED)
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/run)
   ament_add_gtest(test_cyra_flux test/test_schedule.cpp test/test_chain.cpp
     ENV CYRA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
   if(TARGET test_cyra_flux)
     target_link_libraries(test_cyra_flux cyra_flux flux_cpp::flux_cpp)
     ament_target_dependencies(test_cyra_flux rclcpp std_msgs)
-  endif()
-  ament_add_gtest(test_cyra_flux2 test/test_flux2.cpp)
-  if(TARGET test_cyra_flux2)
-    target_link_libraries(test_cyra_flux2 cyra_flux flux2_cpp::flux2_cpp)
-    ament_target_dependencies(test_cyra_flux2 rclcpp std_msgs)
   endif()
 endif()
 
