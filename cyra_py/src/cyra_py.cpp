@@ -48,7 +48,9 @@ NB_MODULE(_cyra, m)
       try {
         std::rethrow_exception(p);
       } catch (const std::system_error & e) {
-        PyErr_SetString(PyExc_OSError, e.what());
+        PyObject * args = Py_BuildValue("(is)", e.code().value(), e.what());
+        PyErr_SetObject(PyExc_OSError, args);
+        Py_XDECREF(args);
       }
     },
     nullptr);
