@@ -363,7 +363,8 @@ impl Reconciler {
             let state = format!("refused by preflight, not set:\n{refusal}");
             return self.note(out, key, state);
         }
-        if !self.owned.contains_key(key) {
+        let fresh = !self.owned.contains_key(key);
+        if fresh {
             let original = match ffi::observe(tid) {
                 Ok(s) => s,
                 Err(e) => return self.note(out, key, format!("cannot read {}: {e}", at(pid, tid))),
@@ -397,7 +398,13 @@ impl Reconciler {
                 )
             }
             Ok(()) => format!("set on {}", at(pid, tid)),
-            Err(e) => format!("cannot set on {}: {e}", at(pid, tid)),
+            Err(e) => {
+                // apply undoes a refused syscall, so a thread taken this pass is left as it was.
+                if fresh {
+                    self.owned.remove(key);
+                }
+                format!("cannot set on {}: {e}", at(pid, tid))
+            }
         };
         self.note(out, key, state);
     }

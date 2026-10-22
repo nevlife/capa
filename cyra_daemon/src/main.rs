@@ -53,12 +53,13 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    print(rec.recover());
     if once {
+        print(rec.recover());
         print(rec.pass());
         return ExitCode::SUCCESS;
     }
 
+    // Blocked before recover, so a reload sent at start waits instead of killing the daemon.
     let signals = match Signals::block() {
         Ok(s) => s,
         Err(e) => {
@@ -66,6 +67,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    print(rec.recover());
     eprintln!("cyrad: watching {path} every {interval}s");
     loop {
         print(rec.pass());

@@ -19,7 +19,7 @@ What it set and moved, with what each thread ran at before, cyrad keeps in `cyra
 
 | Stage | What cyrad does |
 | --- | --- |
-| `match` | Finds the threads the match names. Exactly one: runs `preflight` for it, with memory judged on that thread's process, and skips it when that refuses (a `Fail`, or a `Warn` on a hard chain). Otherwise sets it, read back like `apply_checked`, and puts it back when it drifts. None, two or more, a refusal, or a different thread than before: the thread it set before goes back to what it ran at first, and nothing is set |
+| `match` | Finds the threads the match names. Exactly one: runs `preflight` for it, with memory judged on that thread's process, and skips it when that refuses (a `Fail`, or a `Warn` on a hard chain). Otherwise sets it, read back like `apply_checked`, and puts it back when it drifts. None, two or more, or a refusal: the thread it set before goes back to what it ran at first, and nothing is set. A different thread than before: the old one goes back first, then the new one is set |
 | bound by a thread (`bind`, `spawn`, flux) | Reports drift and changes nothing: the thread owns its stage. With `children_cpus`, moves the stage's reset children there |
 | `external` | Nothing |
 
