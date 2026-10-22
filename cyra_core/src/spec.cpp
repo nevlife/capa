@@ -16,6 +16,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <system_error>
@@ -572,8 +573,11 @@ Report apply_checked(const Stage & stage)
       earlier.begin(), earlier.end(), [&](const record::Task & t) { return t.first == self; }),
     earlier.end());
   Claims & c = claims();
+  // A failed apply leaves the thread as it was, so its claim goes back to what it was.
+  std::optional<std::pair<std::string, Hold>> before;
   {
     std::lock_guard<std::mutex> lock(c.m);
+    if (auto h = c.by_stage.find(held.name); h != c.by_stage.end()) before.emplace(*h);
     auto it = c.by_stage.find(name);
     if (it != c.by_stage.end() && name != held.name) {
       throw std::invalid_argument(
@@ -593,6 +597,10 @@ Report apply_checked(const Stage & stage)
     std::lock_guard<std::mutex> lock(c.m);
     c.by_stage.erase(name);
     held.name.clear();
+    if (before) {
+      held.name = before->first;
+      c.by_stage[before->first] = std::move(before->second);
+    }
     throw;
   }
   for (auto & f : rep.findings) {

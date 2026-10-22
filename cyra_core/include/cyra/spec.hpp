@@ -91,7 +91,8 @@ std::thread spawn(const std::string & target, const std::string & group, F && fn
 {
   std::promise<void> ready;
   auto bound = ready.get_future();
-  std::thread t([&ready, target, group, fn = std::forward<F>(fn)]() mutable {
+  // Owned by the thread: the caller may return and drop its future while set_value still runs.
+  std::thread t([ready = std::move(ready), target, group, fn = std::forward<F>(fn)]() mutable {
     try {
       bind(target, group);
     } catch (...) {

@@ -922,6 +922,25 @@ TEST(Bind, AMatchedStageIsRefused)
   t.join();
 }
 
+TEST(Bind, AFailedRebindKeepsTheStageItHeld)
+{
+  const auto allowed = cyra::current().cpus;
+  ASSERT_FALSE(allowed.empty());
+  SpecFile f(
+    "chains: {c: {target: soft, stages: [{node: /rebind, group: a, cpus: [" +
+    std::to_string(allowed.back()) + "]}, {node: /rebind, group: b, cpus: [1000]}]}}\n");
+  const auto spec = cyra::Spec::load(f.path());
+  std::thread t([&] {
+    cyra::apply_checked(spec.stage("/rebind", "a"));
+    EXPECT_ANY_THROW(cyra::apply_checked(spec.stage("/rebind", "b")));
+    std::thread other([&] {
+      EXPECT_THROW(cyra::apply_checked(spec.stage("/rebind", "a")), std::invalid_argument);
+    });
+    other.join();
+  });
+  t.join();
+}
+
 TEST(Verify, AWindowReadsTheThreadsAndItsCpusCounters)
 {
   const SpecFile file(R"(
