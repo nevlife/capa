@@ -5,7 +5,7 @@ cyra는 데이터 경로 위 스레드의 OS 스케줄링(정책·우선순위·
 | 패키지 | 내용 | 의존 |
 | --- | --- | --- |
 | `cyra_core` | C++17, ROS 미사용. 체인 파일, 적용, 호스트 preflight, 되읽기, 확인 | yaml-cpp |
-| `cyra_flux` | flux `PartitionedExecutor` 스레드용으로 같은 함수 | `cyra_core` |
+| `cyra_flux` | flux `PartitionedExecutor` 스레드용으로 같은 함수 | `cyra_core`, `rclcpp` |
 | `cyra_py` | Python. `cyra`(`cyra_core`의 이름)와 `cyra.flux`(`cyra_flux`의 이름) | `cyra_core` |
 
 C++와 Python은 이름, 인자 순서, 기본값이 같다. 다른 곳은 언어가 강제하는 곳뿐이고 7절에 모았다.
@@ -388,7 +388,7 @@ PREEMPT_RT에서 타이머는 두 문맥 중 하나에서 만료된다. RT와 DE
 
 ### 권한
 
-RT 권한은 `RLIMIT_RTPRIO`로 준다. systemd 유닛의 `LimitRTPRIO=`나 `limits.conf`의 `rtprio`다. `setcap cap_sys_nice+ep`로 주지 않는다. file capability가 붙은 `exec`는 secure-exec가 되고, 그러면 ld.so가 `LD_PRELOAD`와 `LD_LIBRARY_PATH`를 말없이 버린다. 미리 올린 tracer(armo, lttng-ust)가 빠진다(`secure-exec`).
+RT 권한은 `RLIMIT_RTPRIO`로 준다. systemd 유닛의 `LimitRTPRIO=`나 `limits.conf`의 `rtprio`다. `setcap cap_sys_nice+ep`로 주지 않는다. file capability가 붙은 `exec`는 secure-exec가 되고, 그러면 ld.so가 `LD_PRELOAD`와 `LD_LIBRARY_PATH`를 말없이 버린다. 미리 올린 tracer(orma, lttng-ust)가 빠진다(`secure-exec`).
 
 ### lazy binding
 

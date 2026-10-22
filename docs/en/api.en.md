@@ -5,7 +5,7 @@ cyra sets and checks the OS scheduling of the threads on a dataflow path: policy
 | Package | Contents | Depends on |
 | --- | --- | --- |
 | `cyra_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
-| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core` |
+| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core`, `rclcpp` |
 | `cyra_py` | Python: `cyra` (the `cyra_core` names) and `cyra.flux` (the `cyra_flux` names) | `cyra_core` |
 
 C++ and Python have the same names, the same arguments in the same order, and the same defaults. The differences are only where a language forces one, and are listed in section 7.
@@ -388,7 +388,7 @@ A `nohz_full` cpu stops its tick only while one task is runnable there. Put one 
 
 ### Permission
 
-Grant RT with `RLIMIT_RTPRIO`: `LimitRTPRIO=` in a systemd unit, or `rtprio` in `limits.conf`. Not with `setcap cap_sys_nice+ep`. A file capability makes `exec` secure-exec, and ld.so then drops `LD_PRELOAD` and `LD_LIBRARY_PATH` without a word, so a preloaded tracer (armo's, lttng-ust's) is gone (`secure-exec`).
+Grant RT with `RLIMIT_RTPRIO`: `LimitRTPRIO=` in a systemd unit, or `rtprio` in `limits.conf`. Not with `setcap cap_sys_nice+ep`. A file capability makes `exec` secure-exec, and ld.so then drops `LD_PRELOAD` and `LD_LIBRARY_PATH` without a word, so a preloaded tracer (orma's, lttng-ust's) is gone (`secure-exec`).
 
 ### Lazy binding
 
