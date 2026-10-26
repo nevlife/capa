@@ -1,18 +1,18 @@
-# cyra user API
+# capa user API
 
-cyra sets and checks the OS scheduling of the threads on a dataflow path: policy, priority, CPUs, and what their children inherit. The schedule lives in one file; code only says which stage a thread is.
+capa sets and checks the OS scheduling of the threads on a dataflow path: policy, priority, CPUs, and what their children inherit. The schedule lives in one file; code only says which stage a thread is.
 
 | Package | Contents | Depends on |
 | --- | --- | --- |
-| `cyra_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
-| `cyra_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `cyra_core`, `rclcpp` |
-| `cyra_py` | Python: `cyra` (the `cyra_core` names) and `cyra.flux` (the `cyra_flux` names) | `cyra_core` |
+| `capa_core` | C++17, no ROS. The chain file, applying, host preflight, read-back, verification | yaml-cpp |
+| `capa_flux` | The same functions for the threads of a flux `PartitionedExecutor` | `capa_core`, `rclcpp` |
+| `capa_py` | Python: `capa` (the `capa_core` names) and `capa.flux` (the `capa_flux` names) | `capa_core` |
 
 C++ and Python have the same names, the same arguments in the same order, and the same defaults. The differences are only where a language forces one, and are listed in section 7.
 
 ## 1. One line per thread
 
-The file names every stage of a chain and how it runs. `CYRA_SPEC` names the file.
+The file names every stage of a chain and how it runs. `CAPA_SPEC` names the file.
 
 ```yaml
 chains:
@@ -28,14 +28,14 @@ A thread then says which stage it is. Which call depends on who created the thre
 
 | Thread | C++ | Python |
 | --- | --- | --- |
-| One you start | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
-| One that already runs (main, a thread you own) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
-| A flux `PartitionedExecutor` group thread | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+| One you start | `capa::spawn("/perception_node", "infer", fn)` | `capa.spawn("/perception_node", "infer", fn)` |
+| One that already runs (main, a thread you own) | `capa::bind("/control_node", "loop")` | `capa.bind("/control_node", "loop")` |
+| A flux `PartitionedExecutor` group thread | `capa::flux::bind(ex, *node, group, "grab")` | `capa.flux.bind(ex, node, group, "grab")` |
 
 - `bind(target, group="")` puts the calling thread on the stage, checks the host, and reads the result back from the kernel. `target` is a fully-qualified node name (`get_fully_qualified_name()`) with the group label, or a `name` stage's name with no group.
 - `spawn(target, group, fn)` starts a thread, binds it, and only then runs `fn`. It returns once the thread is set. If the bind is refused, `fn` never runs and the refusal is thrown to the caller. Prefer it over a thread that calls `bind` itself: that thread runs unscheduled until it reaches the `bind` line.
-- `cyra::flux::bind(ex, node, group, label="")` registers the bind on the executor. The child serving `group` binds itself before its first callback, and a refusal is the `spin()` error. The stage is looked up at the call, so a typo throws there.
-- With `CYRA_SPEC` unset, all three do nothing (`bind` returns an empty report, `spawn` just runs `fn`, `flux::bind` registers nothing).
+- `capa::flux::bind(ex, node, group, label="")` registers the bind on the executor. The child serving `group` binds itself before its first callback, and a refusal is the `spin()` error. The stage is looked up at the call, so a typo throws there.
+- With `CAPA_SPEC` unset, all three do nothing (`bind` returns an empty report, `spawn` just runs `fn`, `flux::bind` registers nothing).
 - A label the file does not name throws. Applying nothing would hide a typo.
 
 ## 2. The chain file
@@ -48,7 +48,7 @@ chains:
     stages:
       - name: camera_usb_irq      # not a ROS thread: named by `name`
         kind: release             # hands work on; runs above the workers it feeds
-        external: true            # cyra does not set it; raised from the default 50 with chrt
+        external: true            # capa does not set it; raised from the default 50 with chrt
         expect_priority: 85       # an external stage may land on any cpu, so above every worker
       - node: /camera_node
         group: grab               # omitted = the node's default callback group
@@ -77,10 +77,10 @@ chains:
 | `node`, `group` | stage | A ROS thread: fully-qualified node name and group label |
 | `name` | stage | Any other thread. Must not start with `/` and takes no `group` |
 | `kind` | stage | `worker` (default) computes. `release` only hands work on: an IRQ thread, a DDS receive thread, a timer thread |
-| `policy`, `priority`, `cpus`, `children` | stage | What cyra applies (section 3) |
-| `external`, `expect_priority` | stage | A thread cyra does not set. Only `expect_priority` (1..99, 0 undeclared) may be written. Every applying entry point refuses it; `verify` checks it |
-| `match` | stage | `{irq: <handler>}` or `{process: <comm>, thread: <comm>}`: a thread no code of ours runs on, which the daemon `cyrad` finds and sets. `bind` and `apply_checked` refuse it (`docs/en/daemon.en.md`) |
-| `children_cpus` | stage | Where `cyrad` moves the reset children of this stage. Needs `cpus`, `children: reset`, and no cpu in common with `cpus` |
+| `policy`, `priority`, `cpus`, `children` | stage | What capa applies (section 3) |
+| `external`, `expect_priority` | stage | A thread capa does not set. Only `expect_priority` (1..99, 0 undeclared) may be written. Every applying entry point refuses it; `verify` checks it |
+| `match` | stage | `{irq: <handler>}` or `{process: <comm>, thread: <comm>}`: a thread no code of ours runs on, which the daemon `capad` finds and sets. `bind` and `apply_checked` refuse it (`docs/en/daemon.en.md`) |
+| `children_cpus` | stage | Where `capad` moves the reset children of this stage. Needs `cpus`, `children: reset`, and no cpu in common with `cpus` |
 
 Rules, checked when the file is read. Every rule reports the stages that break it.
 
@@ -96,25 +96,25 @@ Rules, checked when the file is read. Every rule reports the stages that break i
 - "Can share a cpu" means the `cpus` overlap. No `cpus`, and an external stage, can land anywhere, so they share every cpu.
 - Stages that are not RT (`policy: other`, `inherit`, external with `expect_priority: 0`) take part in no rule.
 - Unknown keys are refused. There is no version field: a version announces a schema change but does not catch `priorty`.
-- `cyra::Spec::load(path)` reads a file and `cyra::Spec::load()` reads `CYRA_SPEC` (unset gives an empty spec, `empty()` is true). `stages()` lists every stage, `find(target, group)` returns one or null, `stage(target, group)` returns one or throws, `external()` lists the external ones.
-- A `cyra::Stage` carries `match` (a `Match` with `irq`, `process`, `thread`, and `empty()`), `children_cpus`, `node`, `group`, `name`, `kind` (`Kind::Worker` or `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, and `chain` (which chain declared it first).
+- `capa::Spec::load(path)` reads a file and `capa::Spec::load()` reads `CAPA_SPEC` (unset gives an empty spec, `empty()` is true). `stages()` lists every stage, `find(target, group)` returns one or null, `stage(target, group)` returns one or throws, `external()` lists the external ones.
+- A `capa::Stage` carries `match` (a `Match` with `irq`, `process`, `thread`, and `empty()`), `children_cpus`, `node`, `group`, `name`, `kind` (`Kind::Worker` or `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, and `chain` (which chain declared it first).
 
 ## 3. Applying
 
 Everything here applies to the calling thread only. A thread is never set from outside, so there is no window where another thread has half-configured it.
 
-The functions are in `cyra/spec.hpp`, which includes `cyra/rt.hpp`.
+The functions are in `capa/spec.hpp`, which includes `capa/rt.hpp`.
 
 ```cpp doc:apply
-cyra::Options o;
-o.policy = cyra::Policy::Fifo;       // Inherit / Other / Fifo / RoundRobin
+capa::Options o;
+o.policy = capa::Policy::Fifo;       // Inherit / Other / Fifo / RoundRobin
 o.priority = 70;                     // 1..99 for Fifo/RoundRobin, else 0
 o.cpus = {3};                        // empty leaves affinity alone
-o.children = cyra::Children::Reset;  // Reset / Inherit
+o.children = capa::Children::Reset;  // Reset / Inherit
 
-cyra::Report rep = cyra::apply_checked(o, cyra::Strictness::Hard, /*control_priority=*/80);
-rep = cyra::apply_checked(spec.stage("/perception_node", "infer"));  // a stage from a Spec
-rep = cyra::bind("/perception_node", "infer");                       // the stage from CYRA_SPEC
+capa::Report rep = capa::apply_checked(o, capa::Strictness::Hard, /*control_priority=*/80);
+rep = capa::apply_checked(spec.stage("/perception_node", "infer"));  // a stage from a Spec
+rep = capa::bind("/perception_node", "infer");                       // the stage from CAPA_SPEC
 ```
 
 - `apply_checked(opts, strict=Soft, control_priority=0)` runs `preflight` first. If the verdicts block, it throws `std::runtime_error` before touching the thread. It then applies, and reads back from the kernel: policy and priority must match, and the thread's cpus must lie within the requested ones (a cpuset may narrow the mask). A mismatch throws, with the thread already changed.
@@ -142,14 +142,14 @@ Linux gives a new thread its parent's policy, priority, and cpus, and `fork()` a
 ## 4. Checking
 
 ```cpp doc:check
-cyra::Report host = cyra::preflight(o, /*control_priority=*/80);  // judges, changes nothing
-cyra::ThreadState self = cyra::current();                          // this thread, from the kernel
-int tid = cyra::this_tid();                                        // the kernel's id for it
-cyra::ThreadState other = cyra::observe(tid);                      // any thread, any process
-cyra::Report drift = cyra::verify(stage, tid);                     // a thread against its stage
-cyra::Report stray = cyra::verify_process(spec);                   // RT threads nothing explains
-cyra::Report whole = cyra::preflight(spec);                        // the whole file on this host
-cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // and its counters
+capa::Report host = capa::preflight(o, /*control_priority=*/80);  // judges, changes nothing
+capa::ThreadState self = capa::current();                          // this thread, from the kernel
+int tid = capa::this_tid();                                        // the kernel's id for it
+capa::ThreadState other = capa::observe(tid);                      // any thread, any process
+capa::Report drift = capa::verify(stage, tid);                     // a thread against its stage
+capa::Report stray = capa::verify_process(spec);                   // RT threads nothing explains
+capa::Report whole = capa::preflight(spec);                        // the whole file on this host
+capa::Report spent = capa::verify(stage, tid, std::chrono::seconds(1));  // and its counters
 ```
 
 A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`, and `detail`. `Verdict` is `Ok`, `Warn`, `Fail`, `Unknown`, or `Info`. `Unknown` means the source could not be read, not a pass. `Info` is a fact worth knowing that blocks nothing at any strictness. `ok()` is "no `Fail`". `find(id)` returns one finding or null. `to_string()` is for people to read, not to parse.
@@ -198,7 +198,7 @@ A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`,
 | `secure-exec` | `AT_SECURE` in `/proc/<pid>/auxv` | Warn: ld.so dropped `LD_PRELOAD` (section 10) |
 | `bind-now` | `LD_BIND_NOW` in the environment, `BIND_NOW` of every mapped object | Info: an object binds lazily (section 10) |
 
-`preflight(spec)` judges what no single stage can see: the file as a whole on this host. It runs nothing at bind; `cyra check` and `cyra status` print it.
+`preflight(spec)` judges what no single stage can see: the file as a whole on this host. It runs nothing at bind; `capa check` and `capa status` print it.
 
 | id | Fail / Warn / Info |
 | --- | --- |
@@ -210,7 +210,7 @@ A `Report` holds `findings`. Each `Finding` has `id` (a stable slug), `verdict`,
 | `llc-handoff` | Info: adjacent stages of a chain whose cpus share no last-level cache (`cache/index3`, else cpufreq `related_cpus`) |
 | `taint` | Warn: the kernel is tainted W (a warning fired) or L (a soft lockup) |
 
-`verify(stage, tid)` applies nothing. `chrt`, systemd, or a later apply can move a thread after cyra set it; this is how that is seen.
+`verify(stage, tid)` applies nothing. `chrt`, systemd, or a later apply can move a thread after capa set it; this is how that is seen.
 
 | id | Meaning |
 | --- | --- |
@@ -239,18 +239,18 @@ Items the file does not claim are `Unknown`. Three more findings come from `/pro
 | `cpu-softirqs` | `/proc/softirqs`, the stage's cpus | A softirq ran there. RCU wants `rcu_nocbs`, SCHED `isolcpus=domain`, TIMER and HRTIMER `nohz_full`, NET_RX and BLOCK the device's interrupt affinity |
 | `cgroup-throttle` | `cpu.stat` `nr_throttled` and `throttled_usec`, `memory.events` `high`, up the thread's cgroup | The cgroup throttled the thread |
 
-`verify_process(spec)` lists every RT thread of this process that no stage explains, one `undeclared-rt-thread` Warn per thread, or one Ok when there is none. A thread is explained when it holds a stage (`bind`, `spawn`, `apply_checked`), or when it runs at the declared scheduling of a stage with `children: inherit`. A thread that merely runs at a stage's values got there without cyra and is listed. It is a Warn, not a Fail: cyra cannot know whether an undeclared thread is a mistake. It also reports `io-uring`, a Warn for `iou-sqp-*` and `iou-wrk-*` threads (io-wq workers run SCHED_OTHER, and an SQPOLL thread without `IORING_SETUP_SQ_AFF` inherits its creator's cpus, an isolated one included), and `stage-cpu-shared`, a Warn for SCHED_OTHER threads (reset children) left on the cpus of a held hard or `nohz_full` stage that has no `children_cpus`.
+`verify_process(spec)` lists every RT thread of this process that no stage explains, one `undeclared-rt-thread` Warn per thread, or one Ok when there is none. A thread is explained when it holds a stage (`bind`, `spawn`, `apply_checked`), or when it runs at the declared scheduling of a stage with `children: inherit`. A thread that merely runs at a stage's values got there without capa and is listed. It is a Warn, not a Fail: capa cannot know whether an undeclared thread is a mistake. It also reports `io-uring`, a Warn for `iou-sqp-*` and `iou-wrk-*` threads (io-wq workers run SCHED_OTHER, and an SQPOLL thread without `IORING_SETUP_SQ_AFF` inherits its creator's cpus, an isolated one included), and `stage-cpu-shared`, a Warn for SCHED_OTHER threads (reset children) left on the cpus of a held hard or `nohz_full` stage that has no `children_cpus`.
 
 ### Other processes
 
-A thread that holds a stage is recorded, so other processes can see it. Each process that binds keeps one record, `/dev/shm/cyra.<pid>.<starttime>` (`CYRA_RUN_DIR` moves it), write-locked for as long as it lives. The kernel drops the lock when the process exits, so a reader tells a live record from a dead one without asking the process. A forked child does not keep its parent's record alive.
+A thread that holds a stage is recorded, so other processes can see it. Each process that binds keeps one record, `/dev/shm/capa.<pid>.<starttime>` (`CAPA_RUN_DIR` moves it), write-locked for as long as it lives. The kernel drops the lock when the process exits, so a reader tells a live record from a dead one without asking the process. A forked child does not keep its parent's record alive.
 
 Every user can write `/dev/shm`, so a reader believes a record only as far as the kernel vouches for it:
 
 | Record | Believed when |
 | --- | --- |
-| A bind record, in `CYRA_RUN_DIR` | It is a regular file (not a link, not a fifo) writable by its owner only, its owner is the user of the process its name gives, that process started at the time its name gives, and it is locked. Its lines about other processes are ignored |
-| The daemon's record, in `CYRA_DAEMON_DIR` (default `/run/cyra`) | The same, except that its lines may name any process: the directory vouches for them, so it must be writable by its owner alone and the file must be that owner's |
+| A bind record, in `CAPA_RUN_DIR` | It is a regular file (not a link, not a fifo) writable by its owner only, its owner is the user of the process its name gives, that process started at the time its name gives, and it is locked. Its lines about other processes are ignored |
+| The daemon's record, in `CAPA_DAEMON_DIR` (default `/run/capa`) | The same, except that its lines may name any process: the directory vouches for them, so it must be writable by its owner alone and the file must be that owner's |
 
 A record carries its length and a checksum, so one read in the middle of its rewrite is read again rather than half believed.
 
@@ -262,14 +262,14 @@ A record carries its length and a checksum, so one read in the middle of its rew
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::PartitionedExecutor` gives each callback group its own thread. `cyra_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter. `cyra_flux` does not link flux, so include the executor's own header.
+`flux::PartitionedExecutor` gives each callback group its own thread. `capa_flux` has the core functions of the same name with the executor, node, and group in front. The executor is a template parameter. `capa_flux` does not link flux, so include the executor's own header.
 
-The functions are in `cyra/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
+The functions are in `capa/flux.hpp`. Each group takes one declaration, so the three forms go to three groups here.
 
 ```cpp doc:flux
-cyra::flux::bind(ex, *node, grab_group, "grab");  // the stage from CYRA_SPEC
-cyra::flux::apply_checked(ex, *node, infer_group, opts, cyra::Strictness::Hard);  // values
-cyra::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // a Spec's stage
+capa::flux::bind(ex, *node, grab_group, "grab");  // the stage from CAPA_SPEC
+capa::flux::apply_checked(ex, *node, infer_group, opts, capa::Strictness::Hard);  // values
+capa::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // a Spec's stage
 ```
 
 - `group` must belong to `node`. `nullptr` means the node's default group.
@@ -282,20 +282,20 @@ cyra::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // 
 ## 6. Python
 
 ```python doc:python
-import cyra
-import cyra.flux
+import capa
+import capa.flux
 
-cyra.bind(node.get_fully_qualified_name(), "loop")
-t = cyra.spawn("/perception_node", "infer", run_inference)
-cyra.flux.bind(ex, node, group, "grab")
+capa.bind(node.get_fully_qualified_name(), "loop")
+t = capa.spawn("/perception_node", "infer", run_inference)
+capa.flux.bind(ex, node, group, "grab")
 
-rep = cyra.apply_checked(cyra.Options(cyra.Policy.Fifo, 20, [4]), cyra.Strictness.Soft)
+rep = capa.apply_checked(capa.Options(capa.Policy.Fifo, 20, [4]), capa.Strictness.Soft)
 if not rep.ok():
     print(rep.to_string())
-state = cyra.current()          # state.policy compares with os.SCHED_FIFO
+state = capa.current()          # state.policy compares with os.SCHED_FIFO
 ```
 
-Every name in sections 1 to 5 exists in `cyra` or `cyra.flux` with the same arguments. `Options(policy=, priority=, cpus=, children=)` takes keywords. Errors map as follows.
+Every name in sections 1 to 5 exists in `capa` or `capa.flux` with the same arguments. `Options(policy=, priority=, cpus=, children=)` takes keywords. Errors map as follows.
 
 | C++ | Python |
 | --- | --- |
@@ -303,34 +303,34 @@ Every name in sections 1 to 5 exists in `cyra` or `cyra.flux` with the same argu
 | `std::invalid_argument` (a request that would be reinterpreted, an external stage, a stage already held) | `ValueError` |
 | `std::runtime_error` (preflight blocked, read-back mismatch, a file rule, an unknown label) | `RuntimeError` |
 
-Python is not an RT target. Whatever priority a thread holds, the GIL and GC stay unbounded sources of latency. What cyra settles for Python is which thread the kernel prefers when several are runnable and which cores each may use; that matters in the sections that release the GIL (numpy, decoding, I/O).
+Python is not an RT target. Whatever priority a thread holds, the GIL and GC stay unbounded sources of latency. What capa settles for Python is which thread the kernel prefers when several are runnable and which cores each may use; that matters in the sections that release the GIL (numpy, decoding, I/O).
 
 ## 7. Where C++ and Python differ
 
 | Difference | Why |
 | --- | --- |
 | `spawn` returns `std::thread` in C++ and a started `threading.Thread` in Python | A Python function has to run on a thread Python started |
-| `cyra.flux` does not check that `group` belongs to `node` | A flux Python group does not know its node. The stage's node is still checked against `node` |
-| In `cyra.flux`, `group=None` is the node's unit (a node given to `add_node`) | rclpy splits the unit into groups and nodes; C++ has only groups |
-| `cyra.flux.apply_checked` takes `Options` or a `Stage` in one function | Python has no overloads |
+| `capa.flux` does not check that `group` belongs to `node` | A flux Python group does not know its node. The stage's node is still checked against `node` |
+| In `capa.flux`, `group=None` is the node's unit (a node given to `add_node`) | rclpy splits the unit into groups and nodes; C++ has only groups |
+| `capa.flux.apply_checked` takes `Options` or a `Stage` in one function | Python has no overloads |
 
-`cyra_py/test/test_surface.py` fails when a public name exists on one side only.
+`capa_py/test/test_surface.py` fails when a public name exists on one side only.
 
-## 8. What cyra does not do
+## 8. What capa does not do
 
 - It does not guarantee timing. Memory bandwidth interference, GPU driver ordering, timer phase, and sensor disparity are not solved by priorities. Passing preflight means the host is configured, not that a deadline holds.
-- The library does not set threads it cannot run code on (DDS internals, SDK threads, IRQ threads). The daemon `cyrad` does, for stages with `match`; without it, declare them `external` and `verify` them.
+- The library does not set threads it cannot run code on (DDS internals, SDK threads, IRQ threads). The daemon `capad` does, for stages with `match`; without it, declare them `external` and `verify` them.
 - It does not derive priorities. You write them; the file rules check them.
 - An RT stage must block regularly. On PREEMPT_RT the per-cpu timer and RCU threads (`ktimers/N`, `rcuc/N`) run at FIFO 1, so a stage that never sleeps starves them on its cpu. `sched_rt_runtime_us=-1` turns the RT throttle off. From 6.12 the fair deadline server still takes up to 50 ms a second from RT tasks for starving SCHED_OTHER threads (`rt-throttle` reports it), but `ktimers` and `rcuc` are FIFO, not SCHED_OTHER, so nothing gives the cpu back to them.
 - It does not measure latency. [`latency.en.md`](latency.en.md) is the recipe.
 
 ## 9. The connection to flux
 
-`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a flux executor, which they take as a template parameter (C++) or any object (Python), without linking flux. flux knows nothing about cyra, and `cyra_core` does not depend on flux. The hook, the template, and the package split may change at any time; code outside `cyra_flux` and `cyra.flux` must not rely on them.
+`capa_flux` and `capa.flux` register the `on_thread_start` hook of a flux executor, which they take as a template parameter (C++) or any object (Python), without linking flux. flux knows nothing about capa, and `capa_core` does not depend on flux. The hook, the template, and the package split may change at any time; code outside `capa_flux` and `capa.flux` must not rely on them.
 
 ## 10. Running RT threads on Linux
 
-The file checks priorities against each other. These rules are about what a priority cannot express; the findings named here are where cyra sees a part of them.
+The file checks priorities against each other. These rules are about what a priority cannot express; the findings named here are where capa sees a part of them.
 
 ### Waits outside the priority chain
 

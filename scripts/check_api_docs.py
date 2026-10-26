@@ -2,7 +2,7 @@
 """Every public name is in both user documents.
 
 A name added to a header breaks nothing when nobody documents it, so nothing would catch it.
-Python has the same names (cyra_py/test/test_surface.py), so one list covers both languages.
+Python has the same names (capa_py/test/test_surface.py), so one list covers both languages.
 """
 
 import re

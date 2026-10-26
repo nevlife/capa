@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>capa_daemon</name>
+  <version>0.0.0</version>
+  <description>
+    capad (Rust, on capa_core through a cxx bridge): sets the threads a chain file matches by name
+    (interrupt threads, library threads), moves reset children off their stage's cpus, reports
+    drift, and records what it holds so `capa status` sees it. ROS-free.
+  </description>
+  <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>capa_core</depend>
+
+  <test_depend>ament_cmake_test</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

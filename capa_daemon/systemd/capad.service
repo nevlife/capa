@@ -1,0 +1,25 @@
+# Copy to /etc/systemd/system/, set CAPA_SPEC and ExecStart to the installed capad, then
+# `systemctl enable --now capad`. `systemctl reload capad` rereads the file.
+[Unit]
+Description=capa thread scheduling daemon
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=CAPA_SPEC=/etc/capa/chain.yaml
+ExecStart=/opt/capa/bin/capad
+ExecReload=/bin/kill -HUP $MAINPID
+# Setting another process's scheduling needs CAP_SYS_NICE; nothing else is granted.
+User=capa
+# The daemon's record and state: /run/capa, the capa user's, writable by it alone. Kept across a
+# crash, so the restarted daemon can still put threads back where they started.
+RuntimeDirectory=capa
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+AmbientCapabilities=CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_NICE
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

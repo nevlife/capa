@@ -16,7 +16,7 @@ ROW = re.compile(r"^\| ([XS]-\d{3}) \| .* \| (`[^`]+`|-) \| (`[^`]+`|-) \|$")
 
 def gtests():
     names = set()
-    for path in ROOT.glob("cyra_*/test/**/*.cpp"):
+    for path in ROOT.glob("capa_*/test/**/*.cpp"):
         for suite, name in re.findall(r"TEST(?:_F)?\((\w+),\s*(\w+)\)", path.read_text()):
             names.add(f"{suite}.{name}")
     return names
@@ -24,7 +24,7 @@ def gtests():
 
 def pytests():
     names = set()
-    for path in ROOT.glob("cyra_*/test/**/*.py"):
+    for path in ROOT.glob("capa_*/test/**/*.py"):
         names.update(re.findall(r"^def (test_\w+)\(", path.read_text(), re.M))
     return names
 

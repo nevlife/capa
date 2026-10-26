@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>capa_example</name>
+  <version>0.0.0</version>
+  <description>
+    Thread scheduling for a chain that spans processes. preflight asks whether this host can
+    hold a schedule before anything is applied. chain reads its own stage out of the chain
+    declaration file and hands it to the flux executor that owns the thread. C++ only: the Python
+    path is not an RT target.
+  </description>
+  <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>capa_core</depend>
+  <depend>capa_flux</depend>
+  <depend>flux_cpp</depend>
+  <depend>flux_std_adapters</depend>
+  <depend>sensor_msgs</depend>
+  <depend>rclcpp</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

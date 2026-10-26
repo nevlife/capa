@@ -2,7 +2,7 @@
 """Run clang-tidy (.clang-tidy) over the C++ files handed in, and fail on any finding.
 
 clang-tidy needs the compile commands of a build. colcon writes one per package under the
-workspace's build/ when CMAKE_EXPORT_COMPILE_COMMANDS is on; CYRA_BUILD_DIR points elsewhere for a
+workspace's build/ when CMAKE_EXPORT_COMPILE_COMMANDS is on; CAPA_BUILD_DIR points elsewhere for a
 standalone build. No compile commands is a failure, not a pass: a gate that cannot run must not
 report clean.
 
@@ -17,11 +17,11 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGES = ("cyra_core", "cyra_flux", "cyra_py", "cyra_example", "cyra_daemon")
+PACKAGES = ("capa_core", "capa_flux", "capa_py", "capa_example", "capa_daemon")
 
 
 def compile_commands():
-    build = Path(os.environ.get("CYRA_BUILD_DIR", ROOT.parent.parent / "build"))
+    build = Path(os.environ.get("CAPA_BUILD_DIR", ROOT.parent.parent / "build"))
     entries = []
     for pkg in PACKAGES:
         db = build / pkg / "compile_commands.json"
@@ -35,7 +35,7 @@ def main(argv):
     if not entries:
         print(
             f"no compile_commands.json under {build}/<package>/: build with "
-            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON, or set CYRA_BUILD_DIR",
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON, or set CAPA_BUILD_DIR",
             file=sys.stderr,
         )
         return 1

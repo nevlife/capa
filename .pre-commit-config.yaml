@@ -1,4 +1,4 @@
-# cyra pre-commit: formatters, linters and the checks that keep cyra's documents and code in step.
+# capa pre-commit: formatters, linters and the checks that keep capa's documents and code in step.
 exclude: ^thirdparty/  # vendored nanobind stays pristine
 repos:
   - repo: https://github.com/pre-commit/mirrors-clang-format
@@ -17,7 +17,7 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
-        files: ^cyra_py/cyra/
+        files: ^capa_py/capa/
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
@@ -46,29 +46,29 @@ repos:
         additional_dependencies: [clang-tidy==22.1.8]
         types_or: [c++, c]
 
-      # Run from cyra_daemon/ so rustup picks the toolchain its rust-toolchain.toml pins. Both check
+      # Run from capa_daemon/ so rustup picks the toolchain its rust-toolchain.toml pins. Both check
       # the whole crate; clippy also compiles the C++ half of the bridge.
       - id: rustfmt
-        name: rustfmt (cyra_daemon)
-        entry: bash -c 'cd cyra_daemon && cargo fmt --check'
+        name: rustfmt (capa_daemon)
+        entry: bash -c 'cd capa_daemon && cargo fmt --check'
         language: system
-        files: ^cyra_daemon/
+        files: ^capa_daemon/
         pass_filenames: false
 
       - id: clippy
-        name: clippy (cyra_daemon)
-        entry: bash -c 'cd cyra_daemon && cargo clippy --all-targets --locked -- -D warnings'
+        name: clippy (capa_daemon)
+        entry: bash -c 'cd capa_daemon && cargo clippy --all-targets --locked -- -D warnings'
         language: system
-        files: ^cyra_daemon/
+        files: ^capa_daemon/
         pass_filenames: false
 
       # Only when the lock file changes: each run fetches the RustSec advisory database.
       # Needs `cargo install cargo-audit` and the network.
       - id: cargo-audit
-        name: cargo audit (cyra_daemon/Cargo.lock against RustSec)
-        entry: bash -c 'cd cyra_daemon && cargo audit --deny warnings'
+        name: cargo audit (capa_daemon/Cargo.lock against RustSec)
+        entry: bash -c 'cd capa_daemon && cargo audit --deny warnings'
         language: system
-        files: ^cyra_daemon/Cargo\.lock$
+        files: ^capa_daemon/Cargo\.lock$
         pass_filenames: false
 
       - id: flake8

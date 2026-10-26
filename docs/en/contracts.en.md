@@ -1,4 +1,4 @@
-# cyra contracts
+# capa contracts
 
 What C++ and Python both promise, each row with the test on each side that holds it. `scripts/check_contracts.py` fails when a named test does not exist, when an id repeats, or when this file and `docs/ko/contracts.ko.md` disagree on a row's id or tests.
 
@@ -8,7 +8,7 @@ A new promise gets a row before it gets a claim in a user document.
 
 | id | Contract | C++ | Python |
 | --- | --- | --- | --- |
-| X-001 | bind with CYRA_SPEC unset does nothing and returns an empty report | `Bind.WithoutASpecItDoesNothing` | `test_bind_without_a_spec_does_nothing` |
+| X-001 | bind with CAPA_SPEC unset does nothing and returns an empty report | `Bind.WithoutASpecItDoesNothing` | `test_bind_without_a_spec_does_nothing` |
 | X-002 | bind puts the calling thread on its stage, read back from the kernel | `Bind.PutsTheCallingThreadOnItsStage` | `test_bind_puts_the_calling_thread_on_its_stage` |
 | X-003 | A label the file does not name is refused, never ignored | `Bind.ATypoIsRefusedNotIgnored` | `test_bind_refuses_an_unknown_label` |
 | X-004 | spawn runs the function only after the thread is set | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
@@ -41,4 +41,4 @@ A side may be `-` here, never both. The reasons are in `api.en.md` section 7.
 | S-001 | spawn returns std::thread in C++ and a started threading.Thread in Python | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
 | S-002 | Only C++ checks that the group belongs to the node | `ScheduleStage.RejectsAGroupOfAnotherNode` | - |
 | S-003 | In Python, group=None is the node's unit (a node given to add_node) | - | `test_a_node_child_runs_where_it_was_declared` |
-| S-004 | cyra.flux.apply_checked is one function taking Options or a Stage | - | `test_a_stage_reaches_the_group_child` |
+| S-004 | capa.flux.apply_checked is one function taking Options or a Stage | - | `test_a_stage_reaches_the_group_child` |

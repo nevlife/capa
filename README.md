@@ -1,27 +1,27 @@
-# cyra
+# capa
 
 Thread scheduling for ROS 2 nodes on a dataflow path. One file declares how every thread on a chain runs: policy, priority, CPUs, and what its children inherit. The file is checked as a whole (downstream above upstream where they share a CPU, release threads above the work they release, more critical chains first), and each thread applies its own stage with one line, is checked against the host first, and is read back from the kernel after. The name stands for Chain Yield, Rank & Affinity.
 
 ```cpp
-cyra::bind("/control_node", "loop");                     // this thread
-auto t = cyra::spawn("/perception_node", "infer", fn);   // a new thread, set before fn runs
-cyra::flux::bind(ex, *node, group, "grab");              // a flux PartitionedExecutor group
+capa::bind("/control_node", "loop");                     // this thread
+auto t = capa::spawn("/perception_node", "infer", fn);   // a new thread, set before fn runs
+capa::flux::bind(ex, *node, group, "grab");              // a flux PartitionedExecutor group
 ```
 
 | Package | Contents |
 | --- | --- |
-| `cyra_core` | C++17, no ROS. The chain file (`cyra::Spec`), `bind`, `spawn`, `apply_checked`, `preflight`, `verify`, `verify_process` |
-| `cyra_flux` | The same functions for `flux::PartitionedExecutor` threads |
-| `cyra_py` | Python with the same names: `cyra` and `cyra.flux` |
-| `cyra_cli` | The `cyra` command: `cyra check` and `cyra status`, daemonless and read-only ([`docs/en/cli.en.md`](docs/en/cli.en.md)) |
-| `cyra_daemon` | `cyrad` (Rust, on `cyra_core` through a cxx bridge): sets the threads a file matches by name (interrupt, DDS, SDK threads) and moves reset children ([`docs/en/daemon.en.md`](docs/en/daemon.en.md)) |
-| `cyra_example` | `preflight` and `chain`, C++ only |
+| `capa_core` | C++17, no ROS. The chain file (`capa::Spec`), `bind`, `spawn`, `apply_checked`, `preflight`, `verify`, `verify_process` |
+| `capa_flux` | The same functions for `flux::PartitionedExecutor` threads |
+| `capa_py` | Python with the same names: `capa` and `capa.flux` |
+| `capa_cli` | The `capa` command: `capa check` and `capa status`, daemonless and read-only ([`docs/en/cli.en.md`](docs/en/cli.en.md)) |
+| `capa_daemon` | `capad` (Rust, on `capa_core` through a cxx bridge): sets the threads a file matches by name (interrupt, DDS, SDK threads) and moves reset children ([`docs/en/daemon.en.md`](docs/en/daemon.en.md)) |
+| `capa_example` | `preflight` and `chain`, C++ only |
 
 The API is in [`docs/en/api.en.md`](docs/en/api.en.md) ([Korean](docs/ko/api.ko.md)). Measuring latency on a host is [`docs/en/latency.en.md`](docs/en/latency.en.md).
 
 ## Build
 
-cyra supports ROS 2 Humble and Jazzy.
+capa supports ROS 2 Humble and Jazzy.
 
 ```bash
 git submodule update --init          # thirdparty/nanobind
@@ -31,7 +31,7 @@ colcon build --symlink-install
 colcon test
 ```
 
-`cyra_core` also builds without ROS: `cmake -S cyra_core -B build`, with `libyaml-cpp-dev` installed. `-DCYRA_FUZZER=ON -DCMAKE_CXX_COMPILER=clang++` builds `fuzz_spec` for libFuzzer; without it, ctest runs the same harness over a fixed corpus.
+`capa_core` also builds without ROS: `cmake -S capa_core -B build`, with `libyaml-cpp-dev` installed. `-DCAPA_FUZZER=ON -DCMAKE_CXX_COMPILER=clang++` builds `fuzz_spec` for libFuzzer; without it, ctest runs the same harness over a fixed corpus.
 
 ## Checks
 
@@ -40,21 +40,21 @@ colcon test
 | Language | Format | Lint |
 | --- | --- | --- |
 | C++ | clang-format | clang-tidy: defect classes, the C++ Core Guidelines and CERT, less the checks `.clang-tidy` names and says why (needs the build's `compile_commands.json`) |
-| Rust (`cyra_daemon`) | rustfmt | clippy `pedantic` with `-D warnings` (also compiles the C++ half of the bridge), every `unsafe` block one operation with a `SAFETY:` comment; `unsafe` only in the bridge and the signal mask; cargo audit against the RustSec advisory database when `Cargo.lock` changes (needs `cargo install cargo-audit` and the network) |
-| Python | ruff-format | flake8 (defect classes), mypy over `cyra` with the tracked stub `cyra/_cyra.pyi` |
+| Rust (`capa_daemon`) | rustfmt | clippy `pedantic` with `-D warnings` (also compiles the C++ half of the bridge), every `unsafe` block one operation with a `SAFETY:` comment; `unsafe` only in the bridge and the signal mask; cargo audit against the RustSec advisory database when `Cargo.lock` changes (needs `cargo install cargo-audit` and the network) |
+| Python | ruff-format | flake8 (defect classes), mypy over `capa` with the tracked stub `capa/_capa.pyi` |
 | Markdown | markdownlint `--fix` | markdownlint |
 | Shell | | shellcheck |
 | YAML | | yamllint |
 
 Across the tree: every public name is in both user documents (`scripts/check_api_docs.py`), the contract tables name tests that exist (`scripts/check_contracts.py`), and document fences equal the compiled example regions (`scripts/check_doc_examples.py`).
 
-Preflight's judgments are tested on hand-written host snapshots in `cyra_core/test/hosts`: a stock x86 desktop, Orin on JetPack 6, a container, and an RT kernel read as root. `capture.sh` there prints the running host's files, read-only, as a reference for writing one; its output identifies the host and is not committed as-is.
+Preflight's judgments are tested on hand-written host snapshots in `capa_core/test/hosts`: a stock x86 desktop, Orin on JetPack 6, a container, and an RT kernel read as root. `capture.sh` there prints the running host's files, read-only, as a reference for writing one; its output identifies the host and is not committed as-is.
 
-`colcon test` also runs: C++ and Python names match (`test_surface.py`), the tracked stub matches the binding (`test_stub.py`), the yaml fences of the documents load, the fuzz corpus, and the three document checks above. `-DCYRA_SANITIZER=thread` (or `address,undefined`) builds `cyra_core` with a sanitizer.
+`colcon test` also runs: C++ and Python names match (`test_surface.py`), the tracked stub matches the binding (`test_stub.py`), the yaml fences of the documents load, the fuzz corpus, and the three document checks above. `-DCAPA_SANITIZER=thread` (or `address,undefined`) builds `capa_core` with a sanitizer.
 
 ## Connection to flux
 
-`cyra_flux` and `cyra.flux` register the `on_thread_start` hook of a [flux](https://github.com/nevlife/flux) `PartitionedExecutor`. They take the executor as a template parameter in C++ and as any object in Python, so neither links flux; their tests do. flux does not depend on cyra, and `cyra_core` does not depend on flux.
+`capa_flux` and `capa.flux` register the `on_thread_start` hook of a [flux](https://github.com/nevlife/flux) `PartitionedExecutor`. They take the executor as a template parameter in C++ and as any object in Python, so neither links flux; their tests do. flux does not depend on capa, and `capa_core` does not depend on flux.
 
 This connection method may change at any time. The hook, the direct link, and the package split are the current arrangement, not a contract.
 

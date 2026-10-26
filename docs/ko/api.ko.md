@@ -1,18 +1,18 @@
-# cyra 사용자 API
+# capa 사용자 API
 
-cyra는 데이터 경로 위 스레드의 OS 스케줄링(정책·우선순위·CPU, 자식에게 물려줄 것)을 걸고 확인한다. 스케줄은 파일 하나에 두고, 코드는 스레드가 어느 stage인지만 말한다.
+capa는 데이터 경로 위 스레드의 OS 스케줄링(정책·우선순위·CPU, 자식에게 물려줄 것)을 걸고 확인한다. 스케줄은 파일 하나에 두고, 코드는 스레드가 어느 stage인지만 말한다.
 
 | 패키지 | 내용 | 의존 |
 | --- | --- | --- |
-| `cyra_core` | C++17, ROS 미사용. 체인 파일, 적용, 호스트 preflight, 되읽기, 확인 | yaml-cpp |
-| `cyra_flux` | flux `PartitionedExecutor` 스레드용으로 같은 함수 | `cyra_core`, `rclcpp` |
-| `cyra_py` | Python. `cyra`(`cyra_core`의 이름)와 `cyra.flux`(`cyra_flux`의 이름) | `cyra_core` |
+| `capa_core` | C++17, ROS 미사용. 체인 파일, 적용, 호스트 preflight, 되읽기, 확인 | yaml-cpp |
+| `capa_flux` | flux `PartitionedExecutor` 스레드용으로 같은 함수 | `capa_core`, `rclcpp` |
+| `capa_py` | Python. `capa`(`capa_core`의 이름)와 `capa.flux`(`capa_flux`의 이름) | `capa_core` |
 
 C++와 Python은 이름, 인자 순서, 기본값이 같다. 다른 곳은 언어가 강제하는 곳뿐이고 7절에 모았다.
 
 ## 1. 스레드마다 한 줄
 
-파일이 체인의 모든 stage와 그 스케줄을 적는다. `CYRA_SPEC`이 그 파일을 가리킨다.
+파일이 체인의 모든 stage와 그 스케줄을 적는다. `CAPA_SPEC`이 그 파일을 가리킨다.
 
 ```yaml
 chains:
@@ -28,14 +28,14 @@ chains:
 
 | 스레드 | C++ | Python |
 | --- | --- | --- |
-| 새로 만드는 스레드 | `cyra::spawn("/perception_node", "infer", fn)` | `cyra.spawn("/perception_node", "infer", fn)` |
-| 이미 도는 스레드(main, 직접 가진 스레드) | `cyra::bind("/control_node", "loop")` | `cyra.bind("/control_node", "loop")` |
-| flux `PartitionedExecutor` 그룹 스레드 | `cyra::flux::bind(ex, *node, group, "grab")` | `cyra.flux.bind(ex, node, group, "grab")` |
+| 새로 만드는 스레드 | `capa::spawn("/perception_node", "infer", fn)` | `capa.spawn("/perception_node", "infer", fn)` |
+| 이미 도는 스레드(main, 직접 가진 스레드) | `capa::bind("/control_node", "loop")` | `capa.bind("/control_node", "loop")` |
+| flux `PartitionedExecutor` 그룹 스레드 | `capa::flux::bind(ex, *node, group, "grab")` | `capa.flux.bind(ex, node, group, "grab")` |
 
 - `bind(target, group="")`는 호출한 스레드를 그 stage에 걸고, 호스트를 판정하고, 커널에서 되읽는다. `target`은 노드의 전체 이름(`get_fully_qualified_name()`)과 그룹 라벨, 또는 `name` stage의 이름(그룹 없이)이다.
 - `spawn(target, group, fn)`은 스레드를 만들어 bind하고 그 뒤에 `fn`을 돌린다. 스레드가 걸린 뒤에 반환한다. bind가 거절되면 `fn`은 돌지 않고 거절이 호출자에게 던져진다. 스레드 안에서 `bind`를 부르는 방식보다 이것을 쓴다. 그 방식은 `bind` 줄에 닿을 때까지 스케줄 없이 돈다.
-- `cyra::flux::bind(ex, node, group, label="")`는 executor에 bind를 등록한다. `group`을 맡은 자식이 첫 콜백 전에 자기에게 걸고, 거절은 `spin()`의 에러가 된다. stage는 호출 시점에 찾으므로 오타는 그 자리에서 예외를 던진다.
-- `CYRA_SPEC`이 없으면 셋 다 아무것도 하지 않는다. `bind`는 빈 report를 돌려주고, `spawn`은 `fn`만 돌리고, `flux::bind`는 아무것도 등록하지 않는다.
+- `capa::flux::bind(ex, node, group, label="")`는 executor에 bind를 등록한다. `group`을 맡은 자식이 첫 콜백 전에 자기에게 걸고, 거절은 `spin()`의 에러가 된다. stage는 호출 시점에 찾으므로 오타는 그 자리에서 예외를 던진다.
+- `CAPA_SPEC`이 없으면 셋 다 아무것도 하지 않는다. `bind`는 빈 report를 돌려주고, `spawn`은 `fn`만 돌리고, `flux::bind`는 아무것도 등록하지 않는다.
 - 파일에 없는 라벨은 예외를 던진다. 아무것도 안 걸고 넘어가면 오타가 숨는다.
 
 ## 2. 체인 파일
@@ -48,7 +48,7 @@ chains:
     stages:
       - name: camera_usb_irq      # ROS 스레드가 아니면 name으로 부른다
         kind: release             # 일을 넘겨주기만 한다. 먹이는 worker보다 위에서 돈다
-        external: true            # cyra가 걸지 않는다. 기본값 50에서 chrt로 올렸다
+        external: true            # capa가 걸지 않는다. 기본값 50에서 chrt로 올렸다
         expect_priority: 85       # external은 어느 CPU에나 올 수 있으므로 모든 worker보다 위
       - node: /camera_node
         group: grab               # 생략 = 노드의 기본 콜백 그룹
@@ -77,10 +77,10 @@ chains:
 | `node`, `group` | stage | ROS 스레드. 노드 전체 이름과 그룹 라벨 |
 | `name` | stage | 그 밖의 스레드. `/`로 시작하지 않고 `group`을 갖지 않는다 |
 | `kind` | stage | `worker`(기본)는 계산한다. `release`는 일을 넘겨주기만 한다. IRQ 스레드, DDS 수신 스레드, 타이머 스레드 |
-| `policy`, `priority`, `cpus`, `children` | stage | cyra가 거는 것(3절) |
-| `external`, `expect_priority` | stage | cyra가 걸지 않는 스레드. `expect_priority`(1..99, 0은 미선언)만 적는다. 거는 진입점은 전부 거절하고 `verify`가 확인한다 |
-| `match` | stage | `{irq: <handler>}` 또는 `{process: <comm>, thread: <comm>}`. 우리 코드를 넣을 수 없는 스레드로, 데몬 `cyrad`가 찾아서 건다. `bind`와 `apply_checked`는 거절한다(`docs/ko/daemon.ko.md`) |
-| `children_cpus` | stage | `cyrad`가 이 stage의 reset 자식을 옮길 곳. `cpus`, `children: reset`이 있어야 하고 `cpus`와 겹치지 않아야 한다 |
+| `policy`, `priority`, `cpus`, `children` | stage | capa가 거는 것(3절) |
+| `external`, `expect_priority` | stage | capa가 걸지 않는 스레드. `expect_priority`(1..99, 0은 미선언)만 적는다. 거는 진입점은 전부 거절하고 `verify`가 확인한다 |
+| `match` | stage | `{irq: <handler>}` 또는 `{process: <comm>, thread: <comm>}`. 우리 코드를 넣을 수 없는 스레드로, 데몬 `capad`가 찾아서 건다. `bind`와 `apply_checked`는 거절한다(`docs/ko/daemon.ko.md`) |
+| `children_cpus` | stage | `capad`가 이 stage의 reset 자식을 옮길 곳. `cpus`, `children: reset`이 있어야 하고 `cpus`와 겹치지 않아야 한다 |
 
 규칙은 파일을 읽을 때 검사한다. 어긴 stage를 이름으로 보고한다.
 
@@ -96,25 +96,25 @@ chains:
 - "CPU를 공유할 수 있다"는 `cpus`가 겹친다는 뜻이다. `cpus`가 없는 stage와 external stage는 어디에나 올 수 있으므로 모든 CPU를 공유한다.
 - RT가 아닌 stage(`policy: other`, `inherit`, `expect_priority: 0`인 external)는 어떤 규칙에도 들어가지 않는다.
 - 모르는 키는 거절한다. 버전 필드는 없다. 버전 번호는 스키마 교체를 알릴 뿐 `priorty` 같은 오타를 못 잡는다.
-- `cyra::Spec::load(path)`는 파일을, `cyra::Spec::load()`는 `CYRA_SPEC`을 읽는다. 변수가 없으면 빈 spec이고 `empty()`가 참이다. `stages()`는 전부, `find(target, group)`는 하나 또는 null, `stage(target, group)`는 하나 또는 예외, `external()`은 external만 준다.
-- `cyra::Stage`는 `match`(`irq`, `process`, `thread`, `empty()`를 가진 `Match`), `children_cpus`, `node`, `group`, `name`, `kind`(`Kind::Worker` 또는 `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, `chain`(처음 선언한 체인)을 담는다.
+- `capa::Spec::load(path)`는 파일을, `capa::Spec::load()`는 `CAPA_SPEC`을 읽는다. 변수가 없으면 빈 spec이고 `empty()`가 참이다. `stages()`는 전부, `find(target, group)`는 하나 또는 null, `stage(target, group)`는 하나 또는 예외, `external()`은 external만 준다.
+- `capa::Stage`는 `match`(`irq`, `process`, `thread`, `empty()`를 가진 `Match`), `children_cpus`, `node`, `group`, `name`, `kind`(`Kind::Worker` 또는 `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, `chain`(처음 선언한 체인)을 담는다.
 
 ## 3. 적용
 
 여기 있는 것은 전부 호출한 스레드 자신에게만 건다. 밖에서 스레드를 걸지 않으므로, 다른 스레드가 절반만 설정한 구간이 생기지 않는다.
 
-함수는 `cyra/spec.hpp`에 있고, 이 헤더가 `cyra/rt.hpp`를 포함한다.
+함수는 `capa/spec.hpp`에 있고, 이 헤더가 `capa/rt.hpp`를 포함한다.
 
 ```cpp doc:apply
-cyra::Options o;
-o.policy = cyra::Policy::Fifo;       // Inherit / Other / Fifo / RoundRobin
+capa::Options o;
+o.policy = capa::Policy::Fifo;       // Inherit / Other / Fifo / RoundRobin
 o.priority = 70;                     // Fifo/RoundRobin이면 1..99, 아니면 0
 o.cpus = {3};                        // 비우면 affinity를 안 건드린다
-o.children = cyra::Children::Reset;  // Reset / Inherit
+o.children = capa::Children::Reset;  // Reset / Inherit
 
-cyra::Report rep = cyra::apply_checked(o, cyra::Strictness::Hard, /*control_priority=*/80);
-rep = cyra::apply_checked(spec.stage("/perception_node", "infer"));  // Spec의 stage
-rep = cyra::bind("/perception_node", "infer");                       // CYRA_SPEC의 stage
+capa::Report rep = capa::apply_checked(o, capa::Strictness::Hard, /*control_priority=*/80);
+rep = capa::apply_checked(spec.stage("/perception_node", "infer"));  // Spec의 stage
+rep = capa::bind("/perception_node", "infer");                       // CAPA_SPEC의 stage
 ```
 
 - `apply_checked(opts, strict=Soft, control_priority=0)`는 `preflight`를 먼저 돌린다. 판정이 막으면 스레드를 건드리기 전에 `std::runtime_error`를 던진다. 그다음 걸고 커널에서 되읽는다. policy와 priority는 같아야 하고, 스레드의 CPU는 요청한 CPU 안에 있어야 한다(cpuset이 마스크를 좁힐 수 있다). 어긋나면 예외를 던진다. 이때 스레드는 이미 바뀐 상태다.
@@ -142,14 +142,14 @@ Linux는 새 스레드에 부모의 정책, 우선순위, CPU를 준다. `fork()
 ## 4. 확인
 
 ```cpp doc:check
-cyra::Report host = cyra::preflight(o, /*control_priority=*/80);  // 판정만, 변경 없음
-cyra::ThreadState self = cyra::current();                          // 이 스레드, 커널에서
-int tid = cyra::this_tid();                                        // 이 스레드의 커널 id
-cyra::ThreadState other = cyra::observe(tid);                      // 아무 스레드, 프로세스 무관
-cyra::Report drift = cyra::verify(stage, tid);                     // 스레드와 stage 대조
-cyra::Report stray = cyra::verify_process(spec);                   // 설명되지 않는 RT 스레드
-cyra::Report whole = cyra::preflight(spec);                        // 파일 전체를 이 호스트에서
-cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카운터까지
+capa::Report host = capa::preflight(o, /*control_priority=*/80);  // 판정만, 변경 없음
+capa::ThreadState self = capa::current();                          // 이 스레드, 커널에서
+int tid = capa::this_tid();                                        // 이 스레드의 커널 id
+capa::ThreadState other = capa::observe(tid);                      // 아무 스레드, 프로세스 무관
+capa::Report drift = capa::verify(stage, tid);                     // 스레드와 stage 대조
+capa::Report stray = capa::verify_process(spec);                   // 설명되지 않는 RT 스레드
+capa::Report whole = capa::preflight(spec);                        // 파일 전체를 이 호스트에서
+capa::Report spent = capa::verify(stage, tid, std::chrono::seconds(1));  // 카운터까지
 ```
 
 `Report`는 `findings`를 담는다. `Finding`은 `id`(안정 슬러그), `verdict`, `detail`이다. `Verdict`는 `Ok`, `Warn`, `Fail`, `Unknown`, `Info`다. `Unknown`은 소스를 읽지 못한 것이지 통과가 아니다. `Info`는 알아 둘 사실이고, 어떤 strictness에서도 막지 않는다. `ok()`는 "`Fail` 없음"이다. `find(id)`는 finding 하나나 null을 준다. `to_string()`은 사람이 읽는 것이고 파싱할 형식이 아니다.
@@ -198,7 +198,7 @@ cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카�
 | `secure-exec` | `/proc/<pid>/auxv`의 `AT_SECURE` | Warn: ld.so가 `LD_PRELOAD`를 버렸다(10절) |
 | `bind-now` | 환경의 `LD_BIND_NOW`, 매핑된 모든 객체의 `BIND_NOW` | Info: lazy binding하는 객체가 있다(10절) |
 
-`preflight(spec)`는 stage 하나로는 보이지 않는 것, 즉 파일 전체를 이 호스트에서 판정한다. bind 때는 돌지 않고 `cyra check`와 `cyra status`가 출력한다.
+`preflight(spec)`는 stage 하나로는 보이지 않는 것, 즉 파일 전체를 이 호스트에서 판정한다. bind 때는 돌지 않고 `capa check`와 `capa status`가 출력한다.
 
 | id | Fail / Warn / Info |
 | --- | --- |
@@ -210,7 +210,7 @@ cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카�
 | `llc-handoff` | Info: 체인에서 이웃한 stage의 CPU가 last-level cache를 나누지 않는다(`cache/index3`, 없으면 cpufreq `related_cpus`) |
 | `taint` | Warn: 커널이 W(경고 발생)나 L(soft lockup)로 tainted다 |
 
-`verify(stage, tid)`는 아무것도 걸지 않는다. cyra가 건 뒤 `chrt`, systemd, 다른 코드가 스레드를 옮길 수 있고, 그것을 여기서 본다.
+`verify(stage, tid)`는 아무것도 걸지 않는다. capa가 건 뒤 `chrt`, systemd, 다른 코드가 스레드를 옮길 수 있고, 그것을 여기서 본다.
 
 | id | 뜻 |
 | --- | --- |
@@ -239,18 +239,18 @@ cyra::Report spent = cyra::verify(stage, tid, std::chrono::seconds(1));  // 카�
 | `cpu-softirqs` | `/proc/softirqs`, stage의 CPU | softirq가 그 CPU에서 돌았다. RCU는 `rcu_nocbs`, SCHED는 `isolcpus=domain`, TIMER와 HRTIMER는 `nohz_full`, NET_RX와 BLOCK은 장치 인터럽트 affinity로 푼다 |
 | `cgroup-throttle` | 스레드 cgroup을 따라 올라간 `cpu.stat`의 `nr_throttled`, `throttled_usec`, `memory.events`의 `high` | cgroup이 스레드를 묶었다 |
 
-`verify_process(spec)`는 이 프로세스에서 어떤 stage도 설명하지 못하는 RT 스레드마다 `undeclared-rt-thread` Warn을 하나씩 내고, 없으면 Ok 하나를 낸다. stage를 쥔 스레드(`bind`, `spawn`, `apply_checked`)는 설명된다. `children: inherit`인 stage의 스케줄로 도는 스레드도 설명된다. stage의 값과 같게 돌기만 하는 스레드는 cyra 밖에서 그렇게 된 것이라 목록에 나온다. Fail이 아니라 Warn인 이유는 선언 안 한 스레드가 잘못인지 cyra가 알 수 없기 때문이다. `io-uring`도 보고한다. `iou-sqp-*`, `iou-wrk-*` 스레드가 있으면 Warn이다(io-wq 워커는 SCHED_OTHER로 돌고, `IORING_SETUP_SQ_AFF` 없는 SQPOLL 스레드는 만든 스레드의 CPU를 물려받아 격리 CPU에서도 돈다). `stage-cpu-shared`는 `children_cpus` 없는 hard stage나 `nohz_full` stage가 쥐어져 있고, 그 CPU에 SCHED_OTHER 스레드(reset 자식)가 남아 있으면 Warn이다.
+`verify_process(spec)`는 이 프로세스에서 어떤 stage도 설명하지 못하는 RT 스레드마다 `undeclared-rt-thread` Warn을 하나씩 내고, 없으면 Ok 하나를 낸다. stage를 쥔 스레드(`bind`, `spawn`, `apply_checked`)는 설명된다. `children: inherit`인 stage의 스케줄로 도는 스레드도 설명된다. stage의 값과 같게 돌기만 하는 스레드는 capa 밖에서 그렇게 된 것이라 목록에 나온다. Fail이 아니라 Warn인 이유는 선언 안 한 스레드가 잘못인지 capa가 알 수 없기 때문이다. `io-uring`도 보고한다. `iou-sqp-*`, `iou-wrk-*` 스레드가 있으면 Warn이다(io-wq 워커는 SCHED_OTHER로 돌고, `IORING_SETUP_SQ_AFF` 없는 SQPOLL 스레드는 만든 스레드의 CPU를 물려받아 격리 CPU에서도 돈다). `stage-cpu-shared`는 `children_cpus` 없는 hard stage나 `nohz_full` stage가 쥐어져 있고, 그 CPU에 SCHED_OTHER 스레드(reset 자식)가 남아 있으면 Warn이다.
 
 ### 다른 프로세스
 
-stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bind하는 프로세스는 기록 하나를 `/dev/shm/cyra.<pid>.<starttime>`(`CYRA_RUN_DIR`로 옮길 수 있다)에 두고, 사는 동안 쓰기 락을 쥔다. 프로세스가 끝나면 커널이 락을 푼다. 그래서 읽는 쪽은 그 프로세스에 묻지 않고도 살아 있는 기록과 죽은 기록을 가른다. fork한 자식은 부모의 기록을 살려 두지 않는다.
+stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bind하는 프로세스는 기록 하나를 `/dev/shm/capa.<pid>.<starttime>`(`CAPA_RUN_DIR`로 옮길 수 있다)에 두고, 사는 동안 쓰기 락을 쥔다. 프로세스가 끝나면 커널이 락을 푼다. 그래서 읽는 쪽은 그 프로세스에 묻지 않고도 살아 있는 기록과 죽은 기록을 가른다. fork한 자식은 부모의 기록을 살려 두지 않는다.
 
 `/dev/shm`은 모든 사용자가 쓸 수 있다. 그래서 읽는 쪽은 커널이 보증하는 만큼만 기록을 믿는다.
 
 | 기록 | 믿는 조건 |
 | --- | --- |
-| bind 기록(`CYRA_RUN_DIR`) | 일반 파일이고(링크나 fifo 제외) 소유자만 쓸 수 있다. 소유자가 이름이 가리키는 프로세스의 사용자이고, 그 프로세스가 이름에 적힌 시각에 시작했고, 락이 걸려 있다. 다른 프로세스를 가리키는 줄은 무시한다 |
-| 데몬 기록(`CYRA_DAEMON_DIR`, 기본 `/run/cyra`) | 같다. 다만 줄이 어느 프로세스든 가리킬 수 있다. 디렉터리가 그것을 보증하므로, 디렉터리는 소유자만 쓸 수 있어야 하고 파일도 그 소유자의 것이어야 한다 |
+| bind 기록(`CAPA_RUN_DIR`) | 일반 파일이고(링크나 fifo 제외) 소유자만 쓸 수 있다. 소유자가 이름이 가리키는 프로세스의 사용자이고, 그 프로세스가 이름에 적힌 시각에 시작했고, 락이 걸려 있다. 다른 프로세스를 가리키는 줄은 무시한다 |
+| 데몬 기록(`CAPA_DAEMON_DIR`, 기본 `/run/capa`) | 같다. 다만 줄이 어느 프로세스든 가리킬 수 있다. 디렉터리가 그것을 보증하므로, 디렉터리는 소유자만 쓸 수 있어야 하고 파일도 그 소유자의 것이어야 한다 |
 
 기록에는 길이와 체크섬이 있다. 다시 쓰는 도중에 읽힌 기록은 반쯤 믿지 않고 다시 읽는다.
 
@@ -262,14 +262,14 @@ stage를 쥔 스레드는 기록되어 다른 프로세스가 볼 수 있다. bi
 
 ## 5. flux `PartitionedExecutor`
 
-`flux::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `cyra_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자다. `cyra_flux`는 flux를 링크하지 않으므로 executor의 헤더는 직접 include한다.
+`flux::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `capa_flux`는 core와 이름이 같은 함수에 executor, 노드, 그룹을 앞에 붙인 것이다. executor는 템플릿 인자다. `capa_flux`는 flux를 링크하지 않으므로 executor의 헤더는 직접 include한다.
 
-함수는 `cyra/flux.hpp`에 있다. 그룹당 선언이 하나라서 아래 세 형태는 서로 다른 그룹에 건다.
+함수는 `capa/flux.hpp`에 있다. 그룹당 선언이 하나라서 아래 세 형태는 서로 다른 그룹에 건다.
 
 ```cpp doc:flux
-cyra::flux::bind(ex, *node, grab_group, "grab");  // CYRA_SPEC의 stage
-cyra::flux::apply_checked(ex, *node, infer_group, opts, cyra::Strictness::Hard);  // 값으로
-cyra::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // Spec의 stage
+capa::flux::bind(ex, *node, grab_group, "grab");  // CAPA_SPEC의 stage
+capa::flux::apply_checked(ex, *node, infer_group, opts, capa::Strictness::Hard);  // 값으로
+capa::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // Spec의 stage
 ```
 
 - `group`은 `node`의 것이어야 한다. `nullptr`은 노드의 기본 그룹이다.
@@ -282,20 +282,20 @@ cyra::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // 
 ## 6. Python
 
 ```python doc:python
-import cyra
-import cyra.flux
+import capa
+import capa.flux
 
-cyra.bind(node.get_fully_qualified_name(), "loop")
-t = cyra.spawn("/perception_node", "infer", run_inference)
-cyra.flux.bind(ex, node, group, "grab")
+capa.bind(node.get_fully_qualified_name(), "loop")
+t = capa.spawn("/perception_node", "infer", run_inference)
+capa.flux.bind(ex, node, group, "grab")
 
-rep = cyra.apply_checked(cyra.Options(cyra.Policy.Fifo, 20, [4]), cyra.Strictness.Soft)
+rep = capa.apply_checked(capa.Options(capa.Policy.Fifo, 20, [4]), capa.Strictness.Soft)
 if not rep.ok():
     print(rep.to_string())
-state = cyra.current()          # state.policy는 os.SCHED_FIFO와 비교한다
+state = capa.current()          # state.policy는 os.SCHED_FIFO와 비교한다
 ```
 
-1절부터 5절까지의 이름은 전부 `cyra`나 `cyra.flux`에 같은 인자로 있다. `Options(policy=, priority=, cpus=, children=)`는 키워드도 받는다. 예외 대응은 아래와 같다.
+1절부터 5절까지의 이름은 전부 `capa`나 `capa.flux`에 같은 인자로 있다. `Options(policy=, priority=, cpus=, children=)`는 키워드도 받는다. 예외 대응은 아래와 같다.
 
 | C++ | Python |
 | --- | --- |
@@ -303,34 +303,34 @@ state = cyra.current()          # state.policy는 os.SCHED_FIFO와 비교한다
 | `std::invalid_argument`(다르게 해석될 요청, external stage, 이미 쥔 stage) | `ValueError` |
 | `std::runtime_error`(preflight 거절, 되읽기 불일치, 파일 규칙, 없는 라벨) | `RuntimeError` |
 
-Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 상한 없는 지연원으로 남는다. Python에서 cyra가 정하는 것은 여러 스레드가 동시에 runnable일 때 커널이 누구를 고르는지와 각자 어느 코어를 쓰는지다. GIL을 놓는 구간(numpy, 디코딩, I/O)에서 의미가 있다.
+Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC는 상한 없는 지연원으로 남는다. Python에서 capa가 정하는 것은 여러 스레드가 동시에 runnable일 때 커널이 누구를 고르는지와 각자 어느 코어를 쓰는지다. GIL을 놓는 구간(numpy, 디코딩, I/O)에서 의미가 있다.
 
 ## 7. C++와 Python이 다른 곳
 
 | 차이 | 이유 |
 | --- | --- |
 | `spawn`이 C++에서는 `std::thread`, Python에서는 시작된 `threading.Thread`를 준다 | Python 함수는 Python이 시작한 스레드에서 돌아야 한다 |
-| `cyra.flux`는 `group`이 `node`의 것인지 확인하지 않는다 | flux Python 그룹은 자기 노드를 모른다. stage의 노드는 `node`와 대조한다 |
-| `cyra.flux`에서 `group=None`은 노드 단위(`add_node`에 준 노드) | rclpy는 단위를 그룹과 노드로 나눈다. C++에는 그룹만 있다 |
-| `cyra.flux.apply_checked`는 함수 하나가 `Options`와 `Stage`를 다 받는다 | Python에는 overload가 없다 |
+| `capa.flux`는 `group`이 `node`의 것인지 확인하지 않는다 | flux Python 그룹은 자기 노드를 모른다. stage의 노드는 `node`와 대조한다 |
+| `capa.flux`에서 `group=None`은 노드 단위(`add_node`에 준 노드) | rclpy는 단위를 그룹과 노드로 나눈다. C++에는 그룹만 있다 |
+| `capa.flux.apply_checked`는 함수 하나가 `Options`와 `Stage`를 다 받는다 | Python에는 overload가 없다 |
 
-`cyra_py/test/test_surface.py`는 공개 이름이 한쪽에만 있으면 실패한다.
+`capa_py/test/test_surface.py`는 공개 이름이 한쪽에만 있으면 실패한다.
 
-## 8. cyra가 하지 않는 것
+## 8. capa가 하지 않는 것
 
 - 타이밍을 보장하지 않는다. 메모리 대역 간섭, GPU 드라이버 순서, 타이머 위상, 센서 간 disparity는 우선순위로 풀리지 않는다. preflight 통과는 호스트 설정이 됐다는 뜻이지 마감을 지킨다는 뜻이 아니다.
-- 라이브러리는 코드를 넣을 수 없는 스레드(DDS 내부, SDK 스레드, IRQ 스레드)를 걸지 않는다. `match`를 적은 stage는 데몬 `cyrad`가 건다. 데몬이 없으면 `external`로 선언하고 `verify`한다.
+- 라이브러리는 코드를 넣을 수 없는 스레드(DDS 내부, SDK 스레드, IRQ 스레드)를 걸지 않는다. `match`를 적은 stage는 데몬 `capad`가 건다. 데몬이 없으면 `external`로 선언하고 `verify`한다.
 - 우선순위를 도출하지 않는다. 사람이 적고 파일 규칙이 검사한다.
 - RT stage는 주기적으로 block해야 한다. PREEMPT_RT에서 CPU별 타이머와 RCU 스레드(`ktimers/N`, `rcuc/N`)는 FIFO 1이라, 잠들지 않는 stage는 그 CPU에서 이들을 굶긴다. `sched_rt_runtime_us=-1`은 RT throttle을 끈다. 6.12부터는 그래도 fair deadline server가 굶는 SCHED_OTHER 스레드를 위해 RT 태스크에게서 초당 최대 50 ms를 가져간다(`rt-throttle`이 보고한다). 그러나 `ktimers`와 `rcuc`는 SCHED_OTHER가 아니라 FIFO라서, 이들에게 CPU를 되찾아 주는 장치는 없다.
 - 지연을 재지 않는다. 재는 방법은 [`latency.ko.md`](latency.ko.md)에 있다.
 
 ## 9. flux와의 연결
 
-`cyra_flux`와 `cyra.flux`는 flux executor의 `on_thread_start` hook을 등록한다. executor를 템플릿 인자(C++)나 아무 객체(Python)로 받으므로 flux를 링크하지 않는다. flux는 cyra를 모르고 `cyra_core`는 flux에 의존하지 않는다. hook, 템플릿, 패키지 구성은 언제든 바뀔 수 있고, `cyra_flux`와 `cyra.flux` 밖의 코드는 여기에 기대지 않는다.
+`capa_flux`와 `capa.flux`는 flux executor의 `on_thread_start` hook을 등록한다. executor를 템플릿 인자(C++)나 아무 객체(Python)로 받으므로 flux를 링크하지 않는다. flux는 capa를 모르고 `capa_core`는 flux에 의존하지 않는다. hook, 템플릿, 패키지 구성은 언제든 바뀔 수 있고, `capa_flux`와 `capa.flux` 밖의 코드는 여기에 기대지 않는다.
 
 ## 10. Linux에서 RT 스레드 돌리기
 
-파일은 우선순위끼리를 검사한다. 아래 규칙은 우선순위로 표현할 수 없는 것에 관한 것이다. 여기 적은 finding이 cyra가 그 일부를 보는 곳이다.
+파일은 우선순위끼리를 검사한다. 아래 규칙은 우선순위로 표현할 수 없는 것에 관한 것이다. 여기 적은 finding이 capa가 그 일부를 보는 곳이다.
 
 ### 우선순위 사슬 밖의 대기
 

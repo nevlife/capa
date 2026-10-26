@@ -3,8 +3,8 @@
 
 A fence written ```cpp doc:<id> or ```python doc:<id> must equal the region between [doc:<id>] and
 [doc:/<id>] in an example source, comments and blank lines aside (the Korean document comments in
-Korean; the sources may not). The sources are compiled (cyra_example) and name-checked
-(cyra_py/test/test_doc_examples.py), so a fence that drifts from them is a fence nothing checks.
+Korean; the sources may not). The sources are compiled (capa_example) and name-checked
+(capa_py/test/test_doc_examples.py), so a fence that drifts from them is a fence nothing checks.
 Every region needs a fence in both documents, and every fence a region.
 """
 
@@ -16,8 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = (ROOT / "docs" / "en" / "api.en.md", ROOT / "docs" / "ko" / "api.ko.md")
 SOURCES = (
-    ROOT / "cyra_example" / "src" / "doc_api.cpp",
-    ROOT / "cyra_py" / "examples" / "doc_api.py",
+    ROOT / "capa_example" / "src" / "doc_api.cpp",
+    ROOT / "capa_py" / "examples" / "doc_api.py",
 )
 FENCE = re.compile(r"^```(cpp|python) doc:([\w-]+)\n(.*?)^```$", re.M | re.S)
 REGION = re.compile(

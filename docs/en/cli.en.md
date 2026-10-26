@@ -1,8 +1,8 @@
-# The `cyra` command
+# The `capa` command
 
-`cyra` checks a chain file against this host and shows which thread holds each stage and whether it runs as declared. It only reads: the file, the records that binding processes keep, and `/proc`. It needs no ROS and no daemon, and the processes it reports on cannot notice it. It is installed to `bin/` by `cyra_cli`.
+`capa` checks a chain file against this host and shows which thread holds each stage and whether it runs as declared. It only reads: the file, the records that binding processes keep, and `/proc`. It needs no ROS and no daemon, and the processes it reports on cannot notice it. It is installed to `bin/` by `capa_cli`.
 
-The file is the argument, or `CYRA_SPEC` when none is given.
+The file is the argument, or `CAPA_SPEC` when none is given.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -12,12 +12,12 @@ The file is the argument, or `CYRA_SPEC` when none is given.
 
 Summaries show `ok`, `warn`, and `FAIL`. An `Unknown` finding (a source that could not be read, or an item the file claims nothing about) and an `Info` finding (a fact that blocks nothing) are left out of the summary; `-v` prints every finding.
 
-## `cyra check [FILE] [-v]`
+## `capa check [FILE] [-v]`
 
-Reads the file, which fails the command if it breaks a rule, then runs `preflight` for every stage cyra sets and reads the result with the stage's strictness.
+Reads the file, which fails the command if it breaks a rule, then runs `preflight` for every stage capa sets and reads the result with the stage's strictness.
 
 ```text
-$ cyra check chain.yaml
+$ capa check chain.yaml
 chain.yaml: the rules hold
 STAGE              CHAIN      SCHEDULING      HOST            FINDINGS
 -----------------  ---------  --------------  --------------  ---------------------------------
@@ -29,15 +29,15 @@ STAGE              CHAIN      SCHEDULING      HOST            FINDINGS
 
 Below the table, under "the file on this host", come the Warn and Fail findings of `preflight(spec)`: what no single stage shows, such as undeclared RT threads above a stage, SCHED_DEADLINE tasks on stage cpus, or no cpu left for housekeeping. A Fail there ends `check` with 1.
 
-## `cyra status [FILE] [-v] [-w SEC]`
+## `capa status [FILE] [-v] [-w SEC]`
 
 One row per stage of the file, and one per held stage the file does not name.
 
 ```text
-$ cyra status chain.yaml
+$ capa status chain.yaml
 STAGE        PID      TID      STATE     DETAIL
 -----------  -------  -------  --------  ------------------------------
-/dds/listen  -        -        external  not set by cyra; verify(stage, tid) checks it
+/dds/listen  -        -        external  not set by capa; verify(stage, tid) checks it
 /cam/grab    1025542  1025556  FAIL      observed-priority
 /ctl/loop    -        -        unbound   no live thread holds this stage
 ```
@@ -47,11 +47,11 @@ STAGE        PID      TID      STATE     DETAIL
 | `ok` | The holder runs as declared (`verify`) |
 | `warn` / `FAIL` | `verify` found the holder off its declaration; DETAIL names the findings |
 | `unbound` | No live thread holds the stage |
-| `external` | cyra does not set it; it has no recorded thread to check |
+| `external` | capa does not set it; it has no recorded thread to check |
 | `FAIL` held by N threads | Two processes hold one stage. The in-process check cannot see this |
 | held, but not in this file | A live holder of a stage this file does not declare |
 
-A stage the daemon `cyrad` set shows with the pid and tid of the thread it set (`docs/en/daemon.en.md`).
+A stage the daemon `capad` set shows with the pid and tid of the thread it set (`docs/en/daemon.en.md`).
 
 Below the table, every process that holds a stage is scanned with `verify_process`: RT threads there that hold no stage and are not an inherit stage's children are listed, with io_uring helper threads and reset children left on a hard stage's cpus.
 

@@ -1,6 +1,6 @@
 # Measuring latency
 
-cyra sets and checks scheduling; it does not measure latency. This is the order to measure a host in, with the kernel's `rtla` and the `rt-tests` suite. Run `cyra check` first: its Warns are the configuration the measurement will show.
+capa sets and checks scheduling; it does not measure latency. This is the order to measure a host in, with the kernel's `rtla` and the `rt-tests` suite. Run `capa check` first: its Warns are the configuration the measurement will show.
 
 ## Layers
 

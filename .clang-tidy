@@ -2,11 +2,11 @@
 # tree and every hit was a false positive or intended. Of the Core Guidelines and CERT, the ones
 # left out flag the C interfaces a scheduling library is made of (fixed buffers handed to read(),
 # open() and snprintf() being variadic, operator[] on checked indices, octal modes and cpu masks
-# as numbers), ask for GSL types cyra does not use, or name process-wide state kept on purpose.
+# as numbers), ask for GSL types capa does not use, or name process-wide state kept on purpose.
 # cert-err33-c flagged only snprintf, fprintf and remove here; the POSIX calls whose results
 # matter are not on its list.
-# Only cyra's own headers: the vendored nanobind under thirdparty/ is not ours to change.
-HeaderFilterRegex: '.*/cyra_[a-z]+/include/.*'
+# Only capa's own headers: the vendored nanobind under thirdparty/ is not ours to change.
+HeaderFilterRegex: '.*/capa_[a-z]+/include/.*'
 Checks: >
   -*,
   bugprone-*,

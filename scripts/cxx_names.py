@@ -1,6 +1,6 @@
-"""Public C++ names of cyra, read from the headers.
+"""Public C++ names of capa, read from the headers.
 
-One parser for both checks that need it: cyra_py/test/test_surface.py (Python mirrors C++) and
+One parser for both checks that need it: capa_py/test/test_surface.py (Python mirrors C++) and
 scripts/check_api_docs.py (every name is documented). Top-level declarations only, `detail`
 excluded; the headers keep every public declaration at column 0.
 """
@@ -9,8 +9,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CORE_HEADERS = ("cyra_core/include/cyra/rt.hpp", "cyra_core/include/cyra/spec.hpp")
-FLUX_HEADERS = ("cyra_flux/include/cyra/flux.hpp",)
+CORE_HEADERS = ("capa_core/include/capa/rt.hpp", "capa_core/include/capa/spec.hpp")
+FLUX_HEADERS = ("capa_flux/include/capa/flux.hpp",)
 
 TYPE = re.compile(r"(?:struct|class|enum class)\s+(\w+)")
 FUNCTION = re.compile(r"[\w:<>]+[\s&*]+(\w+)\(")

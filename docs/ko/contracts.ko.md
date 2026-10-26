@@ -1,4 +1,4 @@
-# cyra 계약
+# capa 계약
 
 C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테스트를 행마다 적는다. `scripts/check_contracts.py`는 적힌 테스트가 없거나, id가 겹치거나, 이 파일과 `docs/en/contracts.en.md`의 id·테스트가 다르면 실패한다.
 
@@ -8,7 +8,7 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 
 | id | 계약 | C++ | Python |
 | --- | --- | --- | --- |
-| X-001 | CYRA_SPEC이 없으면 bind는 아무것도 안 하고 빈 report를 돌려준다 | `Bind.WithoutASpecItDoesNothing` | `test_bind_without_a_spec_does_nothing` |
+| X-001 | CAPA_SPEC이 없으면 bind는 아무것도 안 하고 빈 report를 돌려준다 | `Bind.WithoutASpecItDoesNothing` | `test_bind_without_a_spec_does_nothing` |
 | X-002 | bind는 호출한 스레드를 stage에 걸고 커널에서 되읽는다 | `Bind.PutsTheCallingThreadOnItsStage` | `test_bind_puts_the_calling_thread_on_its_stage` |
 | X-003 | 파일에 없는 라벨은 무시하지 않고 거절한다 | `Bind.ATypoIsRefusedNotIgnored` | `test_bind_refuses_an_unknown_label` |
 | X-004 | spawn은 스레드가 걸린 뒤에만 함수를 돌린다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
@@ -41,4 +41,4 @@ C++와 Python이 함께 약속하는 것과, 그 약속을 지키는 양쪽 테�
 | S-001 | spawn은 C++에서 std::thread, Python에서 시작된 threading.Thread를 준다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
 | S-002 | 그룹이 노드의 것인지는 C++만 확인한다 | `ScheduleStage.RejectsAGroupOfAnotherNode` | - |
 | S-003 | Python에서 group=None은 노드 단위(add_node에 준 노드) | - | `test_a_node_child_runs_where_it_was_declared` |
-| S-004 | cyra.flux.apply_checked는 Options와 Stage를 함수 하나가 받는다 | - | `test_a_stage_reaches_the_group_child` |
+| S-004 | capa.flux.apply_checked는 Options와 Stage를 함수 하나가 받는다 | - | `test_a_stage_reaches_the_group_child` |
