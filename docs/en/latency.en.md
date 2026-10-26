@@ -8,7 +8,7 @@ Measure from the bottom up. A layer is never better than the one below it.
 
 | Layer | Tool | Shows |
 | --- | --- | --- |
-| Hardware | `rtla hwlat` | SMIs and firmware stalls that nothing in Linux sees |
+| Hardware | `rtla hwnoise` | SMIs and firmware stalls that nothing in Linux sees |
 | Timer interrupt | `rtla timerlat`, IRQ column | From the timer firing to its handler |
 | Timer thread | `rtla timerlat`, thread column | From the timer firing to the woken thread running |
 | User space | `cyclictest` | The same from a user process, through the syscall path |

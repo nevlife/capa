@@ -8,7 +8,7 @@ cyra는 스케줄을 걸고 검사할 뿐 지연을 재지 않는다. 이 문서
 
 | 계층 | 도구 | 보이는 것 |
 | --- | --- | --- |
-| 하드웨어 | `rtla hwlat` | Linux 안에서는 보이지 않는 SMI와 펌웨어 정지 |
+| 하드웨어 | `rtla hwnoise` | Linux 안에서는 보이지 않는 SMI와 펌웨어 정지 |
 | 타이머 인터럽트 | `rtla timerlat`의 IRQ 열 | 타이머가 울린 때부터 핸들러까지 |
 | 타이머 스레드 | `rtla timerlat`의 thread 열 | 타이머가 울린 때부터 깨어난 스레드가 돌 때까지 |
 | 사용자 공간 | `cyclictest` | 같은 것을 사용자 프로세스에서, syscall 경로를 거쳐 |
