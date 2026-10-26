@@ -1,6 +1,6 @@
 # capa
 
-Thread scheduling for ROS 2 nodes on a dataflow path. One file declares how every thread on a chain runs: policy, priority, CPUs, and what its children inherit. The file is checked as a whole (downstream above upstream where they share a CPU, release threads above the work they release, more critical chains first), and each thread applies its own stage with one line, is checked against the host first, and is read back from the kernel after. The name stands for Chain Yield, Rank & Affinity.
+Thread scheduling for ROS 2 nodes on a dataflow path. One file declares how every thread on a chain runs: policy, priority, CPUs, and what its children inherit. The file is checked as a whole (downstream above upstream where they share a CPU, release threads above the work they release, more critical chains first), and each thread applies its own stage with one line, is checked against the host first, and is read back from the kernel after. The name stands for Chain-Aware Priority and Affinity.
 
 ```cpp
 capa::bind("/control_node", "loop");                     // this thread
