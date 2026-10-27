@@ -1,10 +1,33 @@
-# capa 계약
+# capa 기여 안내
+
+capa의 코드를 고치는 사람이 알아야 할 검사와 계약표를 둔다. 사용법은 [README.md](README.md)와 `docs/`에 있다.
+
+## 검사
+
+검사는 `pre-commit install`로 켠다. 언어마다 도는 검사는 아래와 같다.
+
+| 언어 | 포맷 | 린트 |
+| --- | --- | --- |
+| C++ | clang-format | clang-tidy. 결함 부류, C++ Core Guidelines, CERT 검사를 켜고, `.clang-tidy`에 이유를 적은 검사만 끈다. 빌드가 만든 `compile_commands.json`이 필요하다 |
+| Rust(`capa_daemon`) | rustfmt | clippy `pedantic`, `-D warnings`(bridge의 C++ 쪽도 컴파일한다). `unsafe` 블록에는 연산 하나만 넣고 `SAFETY:` 주석을 단다. 이런 블록은 bridge와 시그널 마스크에만 있다. `Cargo.lock`이 바뀌면 cargo audit로 RustSec advisory DB와 대조한다(`cargo install cargo-audit`와 네트워크가 필요하다) |
+| Python | ruff-format | flake8(결함 부류). mypy는 추적하는 stub `capa_py/capa/_capa.pyi`를 써서 `capa` 전체를 검사한다 |
+| Markdown | markdownlint `--fix` | markdownlint |
+| Shell | | shellcheck |
+| YAML | | yamllint |
+
+트리 전체에 걸친 검사도 있다. 공개 이름이 전부 사용자 문서에 있는지(`scripts/check_api_docs.py`), 아래 계약표가 있는 테스트를 가리키는지(`scripts/check_contracts.py`), 문서의 코드 블록이 컴파일되는 예제 구간과 같은지(`scripts/check_doc_examples.py`) 본다.
+
+preflight 판정은 `capa_core/test/hosts`에 있는, 손으로 쓴 호스트 스냅샷으로 시험한다. 스냅샷은 일반 x86 데스크톱, JetPack 6의 Orin, 컨테이너, root로 읽은 RT 커널이다. 같은 디렉터리의 `capture.sh`는 지금 호스트의 파일을 읽어 출력하기만 한다. 이 출력은 스냅샷을 쓸 때 참고하는 용도다. 출력에는 호스트를 알아볼 수 있는 정보가 있으므로 그대로 커밋하지 않는다.
+
+`colcon test`는 다음도 돌린다. C++와 Python의 이름이 같은지(`test_surface.py`), 추적하는 stub이 바인딩과 같은지(`test_stub.py`), 문서의 yaml 블록이 읽히는지 본다. fuzz corpus와 위의 문서 검사 셋도 돌린다. `-DCAPA_SANITIZER=thread`(또는 `address,undefined`)는 `capa_core`를 sanitizer로 빌드한다.
+
+## 계약
 
 C++와 Python이 함께 약속하는 것을 한 행에 하나씩 적고, 그 약속을 확인하는 양쪽의 테스트를 함께 적는다. `scripts/check_contracts.py`는 적힌 테스트가 없거나 id가 겹치면 실패한다.
 
 새 약속은 사용자 문서에 적기 전에 이 표에 행부터 만든다.
 
-## 1. 양쪽
+### 1. 양쪽
 
 | id | 계약 | C++ | Python |
 | --- | --- | --- | --- |
@@ -36,9 +59,9 @@ C++와 Python이 함께 약속하는 것을 한 행에 하나씩 적고, 그 약
 | X-027 | flux bind_declared는 구독을 가진 그룹을 맡은 스레드에 stage를 건다 | `Container.BindDeclaredReachesTheGroupThatHoldsTheSubscription` | `test_bind_declared_reaches_the_node_unit` |
 | X-028 | match의 arg는 cmdline 원소 하나와 정확히 같아야 한다 | `Spec.AMatchNamesAnInterruptOrAProcessAndThread` | `test_a_match_names_a_process_by_one_argument` |
 
-## 2. 의도한 차이
+### 2. 의도한 차이
 
-이 표에서는 테스트 칸 한쪽이 `-`일 수 있지만, 양쪽 다 `-`일 수는 없다. 이유는 `api.md` 7절에 있다.
+이 표에서는 테스트 칸 한쪽이 `-`일 수 있지만, 양쪽 다 `-`일 수는 없다. 이유는 `docs/api.md` 7절에 있다.
 
 | id | 계약 | C++ | Python |
 | --- | --- | --- | --- |

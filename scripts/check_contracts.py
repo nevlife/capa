@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOC = ROOT / "docs" / "contracts.md"
+DOC = ROOT / "CONTRIBUTING.md"
 ROW = re.compile(r"^\| ([XS]-\d{3}) \| .* \| (`[^`]+`|-) \| (`[^`]+`|-) \|$")
 
 
