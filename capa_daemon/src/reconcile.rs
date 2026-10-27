@@ -13,7 +13,9 @@ use cxx::UniquePtr;
 use crate::ffi::{self, Binding, HeldStage, Match, Spec, Stage, Task, ThreadState};
 use crate::state;
 
-const STATE_HEAD: &str = "capad-state 1";
+const STATE_HEAD: &str = "capad-state 2";
+/// Version 1 has no `arg` field in its owned lines; a capad updated across a crash still reads it.
+const STATE_HEAD_V1: &str = "capad-state 1";
 
 /// Where the kernel's tables are read from. Tests point these at fake trees.
 #[derive(Clone, Debug)]
@@ -56,6 +58,12 @@ fn comm_of(name: &str) -> &[u8] {
     &name.as_bytes()[..name.len().min(15)]
 }
 
+/// Whether one NUL-separated element of a cmdline file is exactly `arg`.
+fn has_arg(path: &Path, arg: &str) -> bool {
+    let cmdline = fs::read(path).unwrap_or_default();
+    cmdline.split(|&b| b == 0).any(|a| a == arg.as_bytes())
+}
+
 fn at(pid: i32, tid: i32) -> String {
     format!("pid {pid} tid {tid}")
 }
@@ -85,7 +93,10 @@ pub fn find_threads(m: &Match, roots: &Roots) -> Vec<(i32, i32)> {
     }
     for pid in numeric_entries(&roots.proc) {
         let dir = roots.proc.join(pid.to_string());
-        if first_line(&dir.join("comm")) != comm_of(&m.process) {
+        if !m.process.is_empty() && first_line(&dir.join("comm")) != comm_of(&m.process) {
+            continue;
+        }
+        if !m.arg.is_empty() && !has_arg(&dir.join("cmdline"), &m.arg) {
             continue;
         }
         let tasks = dir.join("task");
@@ -203,16 +214,18 @@ impl Reconciler {
             Err(e) => return vec![format!("state: not read ({e})")],
         };
         let mut lines = text.lines();
-        if lines.next() != Some(STATE_HEAD) {
-            return vec!["state: not a capad state file; ignored".to_owned()];
-        }
+        let v1 = match lines.next() {
+            Some(STATE_HEAD) => false,
+            Some(STATE_HEAD_V1) => true,
+            _ => return vec!["state: not a capad state file; ignored".to_owned()],
+        };
         let mut out = Vec::new();
         let mut owned = BTreeMap::new();
         let mut moved = BTreeMap::new();
         for line in lines {
             let fields: Vec<&str> = line.split('\t').collect();
             let parsed = match fields[..] {
-                ["owned", ..] => parse_owned(&fields)
+                ["owned", ..] => parse_owned(&fields, v1)
                     .map(|(k, o)| owned.insert(k, o))
                     .is_some(),
                 ["moved", ..] => parse_moved(&fields)
@@ -273,7 +286,7 @@ impl Reconciler {
             let (s, m) = (&o.original, &o.matcher);
             writeln!(
                 t,
-                "owned\t{key}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "owned\t{key}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 o.pid,
                 o.tid,
                 o.start,
@@ -283,6 +296,7 @@ impl Reconciler {
                 u8::from(s.reset_on_fork),
                 m.irq,
                 m.process,
+                m.arg,
                 m.thread
             )
             .expect("a String takes any write");
@@ -509,7 +523,11 @@ fn parse_cpus(field: &str) -> Option<Vec<u32>> {
     field.split(',').map(|c| c.parse().ok()).collect()
 }
 
-fn parse_owned(f: &[&str]) -> Option<(String, Owned)> {
+fn parse_owned(f: &[&str], v1: bool) -> Option<(String, Owned)> {
+    let mut f = f.to_vec();
+    if v1 && f.len() == 12 {
+        f.insert(11, "");
+    }
     let [
         _,
         key,
@@ -522,8 +540,9 @@ fn parse_owned(f: &[&str]) -> Option<(String, Owned)> {
         reset,
         irq,
         process,
+        arg,
         thread,
-    ] = f
+    ] = f.as_slice()
     else {
         return None;
     };
@@ -536,6 +555,7 @@ fn parse_owned(f: &[&str]) -> Option<(String, Owned)> {
     let matcher = Match {
         irq: (*irq).to_owned(),
         process: (*process).to_owned(),
+        arg: (*arg).to_owned(),
         thread: (*thread).to_owned(),
     };
     let o = Owned {

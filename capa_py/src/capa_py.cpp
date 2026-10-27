@@ -123,12 +123,33 @@ NB_MODULE(_capa, m)
   nb::class_<capa::Match>(m, "Match")
     .def_ro("irq", &capa::Match::irq)
     .def_ro("process", &capa::Match::process)
+    .def_ro("arg", &capa::Match::arg)
     .def_ro("thread", &capa::Match::thread)
     .def("empty", &capa::Match::empty);
+
+  nb::class_<capa::Holds>(m, "Holds")
+    .def_ro("subscription", &capa::Holds::subscription)
+    .def_ro("service", &capa::Holds::service)
+    .def("empty", &capa::Holds::empty);
+
+  nb::class_<capa::GroupContent>(m, "GroupContent")
+    .def(
+      "__init__",
+      [](
+        capa::GroupContent * self, bool is_default, std::vector<std::string> subscriptions,
+        std::vector<std::string> services) {
+        new (self) capa::GroupContent{is_default, std::move(subscriptions), std::move(services)};
+      },
+      "is_default"_a = false, "subscriptions"_a = std::vector<std::string>{},
+      "services"_a = std::vector<std::string>{})
+    .def_rw("is_default", &capa::GroupContent::is_default)
+    .def_rw("subscriptions", &capa::GroupContent::subscriptions)
+    .def_rw("services", &capa::GroupContent::services);
 
   nb::class_<capa::Stage>(m, "Stage")
     .def_ro("node", &capa::Stage::node)
     .def_ro("group", &capa::Stage::group)
+    .def_ro("holds", &capa::Stage::holds)
     .def_ro("name", &capa::Stage::name)
     .def_ro("kind", &capa::Stage::kind)
     .def_ro("external", &capa::Stage::external)
@@ -150,7 +171,11 @@ NB_MODULE(_capa, m)
     .def("stages", &capa::Spec::stages, nb::rv_policy::reference_internal)
     .def("stage", &capa::Spec::stage, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
     .def("find", &capa::Spec::find, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
-    .def("external", &capa::Spec::external, nb::rv_policy::reference_internal);
+    .def("external", &capa::Spec::external, nb::rv_policy::reference_internal)
+    .def(
+      "declared", &capa::Spec::declared, "node"_a, "groups"_a, nb::rv_policy::reference_internal,
+      nb::sig("def declared(self, node: str, groups: collections.abc.Sequence[GroupContent]) -> "
+              "list[Stage | None]"));
 
   m.def(
     "preflight", nb::overload_cast<const capa::Options &, int, capa::Strictness>(&capa::preflight),
@@ -162,6 +187,7 @@ NB_MODULE(_capa, m)
     "strict"_a = capa::Strictness::Soft, "control_priority"_a = 0);
   m.def("apply_checked", nb::overload_cast<const capa::Stage &>(&capa::apply_checked), "stage"_a);
   m.def("bind", &capa::bind, "target"_a, "group"_a = "");
+  m.def("bind_declared", &capa::bind_declared, "target"_a, "group"_a = "");
   m.def("current", &capa::current);
   m.def("this_tid", &capa::this_tid, "The kernel tid; threading.get_ident() is not this number.");
   m.def("observe", &capa::observe, "tid"_a);

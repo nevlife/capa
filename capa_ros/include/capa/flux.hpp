@@ -7,6 +7,8 @@
 #include <rclcpp/node.hpp>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 // Each call is the capa_core function of the same name, run by the child serving `group` before
 // its first callback. `Executor` is a flux::PartitionedExecutor.
@@ -23,7 +25,24 @@ rclcpp::CallbackGroup::SharedPtr owned_group(
 rclcpp::CallbackGroup::SharedPtr stage_group(
   rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage);
 
+// Every callback group of `node` the file declares, with its stage (Spec::declared).
+std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>> declared_groups(
+  const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node);
+
 }  // namespace detail
+
+// What `group` (nullptr: the default one) of `node` holds, flux::Subscription objects included. A
+// caller with an agnocast subscription or a flux message_filters::Subscriber adds its topic and
+// calls Spec::declared().
+GroupContent content(
+  rclcpp::node_interfaces::NodeBaseInterface & node,
+  const rclcpp::CallbackGroup::SharedPtr & group);
+
+// The stage `spec` declares for `group` (nullptr: the default one) of `node`, or nullptr. For an
+// executor that does not take hooks: call it on the group's thread and apply_checked() the result.
+const Stage * declared(
+  const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
+  const rclcpp::CallbackGroup::SharedPtr & group);
 
 template <class Executor>
 void apply_checked(
@@ -54,6 +73,19 @@ void bind(
   const Spec spec = Spec::load();
   if (spec.empty()) return;
   apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), label));
+}
+
+// bind() for every group of `node` that Spec::declared() resolves, for a container that loads
+// nodes it knows nothing about: one call per node, before spin(). Groups created later are not
+// seen, and a stage named by label alone is left to bind().
+template <class Executor>
+void bind_declared(Executor & ex, rclcpp::node_interfaces::NodeBaseInterface & node)
+{
+  const Spec spec = Spec::load();
+  if (spec.empty()) return;
+  for (const auto & [group, stage] : detail::declared_groups(spec, node)) {
+    ex.on_thread_start(group, [st = *stage] { capa::apply_checked(st); });
+  }
 }
 
 }  // namespace capa::flux

@@ -71,6 +71,7 @@ set(capa_core_test_srcs
   test/test_hosts.cpp
   test/test_record.cpp
   test/test_rt.cpp
+  test/test_signals.cpp
   test/test_spec.cpp)
 # Tests write their records here rather than into the host's /dev/shm.
 set(CAPA_TEST_RUN_DIR ${CMAKE_CURRENT_BINARY_DIR}/run)

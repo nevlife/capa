@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-// One OFD write-locked file per process; the kernel drops the lock at exit. Trust: api.en.md 4.
+// One OFD write-locked file per process; the kernel drops the lock at exit. Trust: docs/api.md 4.
 
 namespace capa::record
 {

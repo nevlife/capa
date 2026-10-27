@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGES = ("capa_core", "capa_flux", "capa_py", "capa_example", "capa_daemon")
+PACKAGES = ("capa_core", "capa_ros", "capa_py", "capa_example", "capa_daemon")
 
 
 def compile_commands():

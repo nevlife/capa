@@ -403,3 +403,36 @@ def test_informational_findings_never_block_a_hard_request():
     for f in rep.findings:
         if f.id in info:
             assert f.verdict != capa.Verdict.Warn, f.id
+
+
+# A container binds every thread it starts; a thread the file does not declare stays as it was.
+def test_bind_declared_binds_only_what_the_file_declares(tmp_path, monkeypatch):
+    monkeypatch.delenv("CAPA_SPEC", raising=False)
+    assert capa.bind_declared("/flux_rt_test", "infer") is None
+    target = spare_cpus[-1]
+    monkeypatch.setenv("CAPA_SPEC", _spec_file(tmp_path, target))
+    got = {}
+
+    def worker():
+        before = capa.current().cpus
+        got["undeclared"] = capa.bind_declared("/flux_rt_test", "infr")
+        got["untouched"] = capa.current().cpus == before
+        got["declared"] = capa.bind_declared("/flux_rt_test", "infer")
+        got["cpus"] = capa.current().cpus
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=5.0)
+    assert got["undeclared"] is None and got["untouched"]
+    assert isinstance(got["declared"], capa.Report)
+    assert got["cpus"] == [target]
+
+
+def test_a_match_names_a_process_by_one_argument(tmp_path):
+    path = tmp_path / "arg.yaml"
+    path.write_text(
+        "chains: {c: {target: soft, stages: [{name: rx, kind: release, "
+        'match: {arg: "__node:=planning", thread: recvUC}, cpus: [0]}]}}\n'
+    )
+    m = capa.Spec.load(str(path)).stage("rx").match
+    assert (m.process, m.arg, m.thread) == ("", "__node:=planning", "recvUC")

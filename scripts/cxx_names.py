@@ -10,10 +10,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CORE_HEADERS = ("capa_core/include/capa/rt.hpp", "capa_core/include/capa/spec.hpp")
-FLUX_HEADERS = ("capa_flux/include/capa/flux.hpp",)
+FLUX_HEADERS = ("capa_ros/include/capa/flux.hpp",)
 
 TYPE = re.compile(r"(?:struct|class|enum class)\s+(\w+)")
-FUNCTION = re.compile(r"[\w:<>]+[\s&*]+(\w+)\(")
+FUNCTION = re.compile(r"(?:const\s+)?[\w:<>]+[\s&*]+(\w+)\(")
 
 
 def names(headers):

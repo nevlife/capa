@@ -1,11 +1,12 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>capa_flux</name>
+  <name>capa_ros</name>
   <version>0.0.0</version>
   <description>
-    capa for flux: applies capa thread scheduling and chain stages to the callback group
-    threads of a flux PartitionedExecutor.
+    capa for ROS 2: applies capa thread scheduling and chain stages to callback group threads,
+    those of a flux PartitionedExecutor and those of capa_component_container, a component
+    container that binds every group the chain file declares.
   </description>
   <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
   <license>MIT</license>
@@ -13,10 +14,13 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>capa_core</depend>
+  <depend>flux_components</depend>
+  <depend>flux_cpp</depend>
   <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
-  <test_depend>flux_cpp</test_depend>
+  <test_depend>composition_interfaces</test_depend>
   <test_depend>std_msgs</test_depend>
 
   <export>

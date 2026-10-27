@@ -300,11 +300,72 @@ void judge_cgroup(Report & rep, const Snapshot & a, const Snapshot & b)
   }
 }
 
+// A process-directed signal goes to the thread the kernel suggests if that thread wants it, and
+// only otherwise to another: complete_signal() and wants_signal() in kernel/signal.c. kill() and
+// a terminal suggest the first thread (pid == tid). SIGCHLD suggests the child's parent, which is
+// the thread that forked it (copy_process sets real_parent = current).
+void judge_signals(Report & rep, const Fs & fs, int pid, int tid, bool rt)
+{
+  const auto status = fs.read(task_dir(pid, tid) + "/status");
+  if (!rt) {
+    add(rep, "signals", Verdict::Unknown, "not an RT thread, so its signals are not judged");
+    return;
+  }
+  if (!status) {
+    add(rep, "signals", Verdict::Unknown, "cannot read " + task_dir(pid, tid) + "/status");
+    return;
+  }
+  const auto leader = tid == pid ? status : fs.read(task_dir(pid, pid) + "/status");
+  if (!leader) {
+    add(rep, "signals", Verdict::Unknown, "cannot read " + task_dir(pid, pid) + "/status");
+    return;
+  }
+  const auto blocked = field(*status, "SigBlk");
+  const auto caught = field(*status, "SigCgt");
+  const auto leader_blocked = field(*leader, "SigBlk");
+  const auto state = field(*leader, "State").value_or("");
+  const bool leader_exited = !state.empty() && (state[0] == 'Z' || state[0] == 'X');
+  const std::string first = "the first thread (tid " + std::to_string(pid) + ")";
+  std::vector<std::string> warn;
+  std::vector<std::string> info;
+  for (const auto & [sig, name] : {std::pair{2, "SIGINT"}, {15, "SIGTERM"}}) {
+    if (!bit(caught, sig) || bit(blocked, sig)) continue;
+    if (tid == pid) {
+      warn.push_back(std::string(name) + " (this is the first thread, which takes it first)");
+    } else if (leader_exited) {
+      warn.push_back(std::string(name) + " (" + first + " has exited, so any thread takes it)");
+    } else if (bit(leader_blocked, sig)) {
+      warn.push_back(std::string(name) + " (" + first + " blocks it, so another thread takes it)");
+    } else {
+      info.emplace_back(name);
+    }
+  }
+  if (bit(caught, 17) && !bit(blocked, 17)) {
+    warn.emplace_back(
+      "SIGCHLD (it goes to the thread that forked the child, and to any thread while that one "
+      "blocks it, as system() does)");
+  }
+  if (!warn.empty()) {
+    add(
+      rep, "signals", Verdict::Warn,
+      list_some(warn, 3) +
+        ": caught by the process and not blocked here, so the handler may run on this RT thread; "
+        "block them in RT threads and take them on one SCHED_OTHER thread");
+  } else if (!info.empty()) {
+    add(
+      rep, "signals", Verdict::Info,
+      list_some(info, 2) + " are caught by the process and not blocked here, but " + first +
+        " takes a process signal first. This thread takes one only while that thread blocks it, "
+        "is exiting or stopped, or sleeps with a signal already pending");
+  } else {
+    add(rep, "signals", Verdict::Ok, "no process signal handler can run on it");
+  }
+}
+
 }  // namespace
 
-void verify_now(Report & rep, int tid, const ThreadState & st)
+void verify_now(Report & rep, const Fs & fs, int tid, const ThreadState & st)
 {
-  const Fs fs;
   const int pid = pid_of(fs, tid);
   const bool rt = st.policy == SCHED_FIFO || st.policy == SCHED_RR;
   const auto t = task(fs, pid, tid);
@@ -322,28 +383,7 @@ void verify_now(Report & rep, int tid, const ThreadState & st)
       add(rep, "pi-boosted", Verdict::Ok, "not boosted");
     }
   }
-  const auto status = fs.read(task_dir(pid, tid) + "/status");
-  if (!rt) {
-    add(rep, "signals", Verdict::Unknown, "not an RT thread, so its signals are not judged");
-  } else if (!status) {
-    add(rep, "signals", Verdict::Unknown, "cannot read " + task_dir(pid, tid) + "/status");
-  } else {
-    const auto blocked = field(*status, "SigBlk");
-    const auto caught = field(*status, "SigCgt");
-    std::vector<std::string> open;
-    for (const auto & [sig, name] : {std::pair{2, "SIGINT"}, {15, "SIGTERM"}, {17, "SIGCHLD"}}) {
-      if (bit(caught, sig) && !bit(blocked, sig)) open.emplace_back(name);
-    }
-    if (open.empty()) {
-      add(rep, "signals", Verdict::Ok, "no process signal handler can run on it");
-    } else {
-      add(
-        rep, "signals", Verdict::Warn,
-        list_some(open, 3) +
-          " are caught by the process and not blocked here, so the handler may run on this RT "
-          "thread; block them in RT threads and take them on one SCHED_OTHER thread");
-    }
-  }
+  judge_signals(rep, fs, pid, tid, rt);
   const auto slack = fs.read("/proc/" + std::to_string(tid) + "/timerslack_ns");
   if (!slack) {
     add(

@@ -58,3 +58,15 @@ void doc_flux(
   capa::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // a Spec's stage
   // [doc:/flux]
 }
+
+void doc_container(
+  flux::PartitionedExecutor & ex,
+  const rclcpp::node_interfaces::NodeBaseInterface::SharedPtr & node,
+  const rclcpp::CallbackGroup::SharedPtr & group, const capa::Spec & spec)
+{
+  // [doc:container]
+  capa::flux::bind_declared(ex, *node);  // flux: every group of the node the file declares
+  const capa::Stage * st = capa::flux::declared(spec, *node, group);  // any other executor,
+  if (st != nullptr) capa::apply_checked(*st);                        // on the group's thread
+  // [doc:/container]
+}

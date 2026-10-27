@@ -15,7 +15,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>capa_core</depend>
-  <depend>capa_flux</depend>
+  <depend>capa_ros</depend>
   <depend>flux_cpp</depend>
   <depend>flux_std_adapters</depend>
   <depend>sensor_msgs</depend>

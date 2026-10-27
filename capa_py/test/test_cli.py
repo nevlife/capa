@@ -1,4 +1,4 @@
-"""capa_cli against real holder processes.
+"""The capa command against real holder processes.
 
 The commands are thin over capa.Spec, capa.preflight, capa.bindings, capa.verify and
 capa.verify_process, which capa_core and capa_py test. What is pinned here is what the text and the
@@ -13,7 +13,7 @@ import sys
 import pytest
 
 import capa
-from capa_cli.main import main
+from capa.cli.main import main
 
 CPU = sorted(os.sched_getaffinity(0))[0]
 

@@ -124,13 +124,34 @@ bool share_a_cpu(const Stage & a, const Stage & b)
   return false;
 }
 
+void parse_holds(const YAML::Node & h, Stage & st, const std::string & chain)
+{
+  const std::string where = detail::stage_name(st) + " in chain " + chain;
+  if (!h.IsMap()) fail("stage " + where + ": holds is not a mapping");
+  reject_unknown_keys(h, {"subscription", "service"}, "the holds of stage " + where);
+  if (h["subscription"]) st.holds.subscription = h["subscription"].as<std::string>();
+  if (h["service"]) st.holds.service = h["service"].as<std::string>();
+  const std::string name = st.holds.subscription.empty() ? st.holds.service : st.holds.subscription;
+  if (h.size() != 1 || name.empty() || name.front() != '/') {
+    fail(
+      "stage " + where +
+      ": holds is {subscription: <topic>} or {service: <name>}, one resolved name starting with "
+      "'/'");
+  }
+  if (st.group.empty()) {
+    fail(
+      "stage " + where +
+      ": holds needs a group label; the label names the stage, holds finds its group");
+  }
+}
+
 Stage parse_stage(const YAML::Node & n, const std::string & chain)
 {
   if (!n.IsMap()) fail("a stage in chain " + chain + " is not a mapping");
   reject_unknown_keys(
     n,
-    {"node", "group", "name", "kind", "external", "expect_priority", "policy", "priority", "cpus",
-     "children", "match", "children_cpus"},
+    {"node", "group", "holds", "name", "kind", "external", "expect_priority", "policy", "priority",
+     "cpus", "children", "match", "children_cpus"},
     "a stage of chain " + chain);
 
   Stage st;
@@ -143,13 +164,16 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
         "stage name '" + st.name + "' in chain " + chain +
         " must be non-empty and must not start with '/', which is how node stages are spelled");
     }
-    if (n["group"]) fail("stage " + st.name + " in chain " + chain + " is a name, not a node");
+    if (n["group"] || n["holds"]) {
+      fail("stage " + st.name + " in chain " + chain + " is a name, not a node");
+    }
   } else if (n["node"]) {
     st.node = n["node"].as<std::string>();
     if (st.node.empty() || st.node.front() != '/') {
       fail("stage node '" + st.node + "' in chain " + chain + " must be a fully-qualified name");
     }
     if (n["group"]) st.group = n["group"].as<std::string>();
+    if (n["holds"]) parse_holds(n["holds"], st, chain);
   } else {
     fail("a stage in chain " + chain + " has neither node nor name");
   }
@@ -165,11 +189,11 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
         " must not carry policy/priority/cpus/children; capa does not set it. Use "
         "expect_priority to record what it should already be running at");
     }
-    if (n["match"]) {
+    if (n["match"] || n["holds"]) {
       fail(
         "external stage " + where +
-        " must not carry match: a matched stage is one the daemon sets, and external says "
-        "nobody does");
+        " must not carry match or holds: both pick a thread to set, and external says nobody "
+        "sets it");
     }
     if (n["expect_priority"]) st.expect_priority = n["expect_priority"].as<int>();
     if (st.expect_priority < 0 || st.expect_priority > 99) {
@@ -200,17 +224,32 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
   if (n["match"]) {
     const YAML::Node & m = n["match"];
     if (!m.IsMap()) fail("stage " + where + ": match is not a mapping");
-    reject_unknown_keys(m, {"irq", "process", "thread"}, "the match of stage " + where);
-    if (m["irq"]) st.match.irq = m["irq"].as<std::string>();
-    if (m["process"]) st.match.process = m["process"].as<std::string>();
-    if (m["thread"]) st.match.thread = m["thread"].as<std::string>();
+    reject_unknown_keys(m, {"irq", "process", "arg", "thread"}, "the match of stage " + where);
+    for (const auto & [key, field] :
+         {std::pair{"irq", &st.match.irq},
+          {"process", &st.match.process},
+          {"arg", &st.match.arg},
+          {"thread", &st.match.thread}}) {
+      if (!m[key]) continue;
+      *field = m[key].as<std::string>();
+      // The daemon's state file is one line per thread, tab-separated.
+      if (field->find_first_of("\t\n") != std::string::npos) {
+        fail("stage " + where + ": match " + key + " holds a tab or newline");
+      }
+    }
     const bool by_irq = !st.match.irq.empty();
-    const bool by_comm = !st.match.process.empty() && !st.match.thread.empty();
-    if (by_irq == by_comm || (by_irq && (m["process"] || m["thread"]))) {
+    const bool by_process =
+      !st.match.thread.empty() && (!st.match.process.empty() || !st.match.arg.empty());
+    if (by_irq == by_process || (by_irq && (m["process"] || m["arg"] || m["thread"]))) {
       fail(
         "stage " + where +
-        ": match is either {irq: <name>} or {process: <comm>, thread: "
-        "<comm>}");
+        ": match is either {irq: <name>} or {process: <comm>, arg: <argv element>, thread: "
+        "<comm>} with thread and at least one of process and arg");
+    }
+    if (n["holds"]) {
+      fail(
+        "stage " + where +
+        ": holds picks a group thread that binds itself, and match one the daemon sets");
     }
     if (st.opts.policy == Policy::Inherit && st.opts.cpus.empty()) {
       fail(
@@ -245,7 +284,9 @@ bool same_declaration(const Stage & a, const Stage & b)
          a.opts.policy == b.opts.policy && a.opts.priority == b.opts.priority &&
          a.opts.cpus == b.opts.cpus && a.opts.children == b.opts.children &&
          a.match.irq == b.match.irq && a.match.process == b.match.process &&
-         a.match.thread == b.match.thread && a.children_cpus == b.children_cpus;
+         a.match.arg == b.match.arg && a.match.thread == b.match.thread &&
+         a.holds.subscription == b.holds.subscription && a.holds.service == b.holds.service &&
+         a.children_cpus == b.children_cpus;
 }
 
 struct Chain
@@ -429,6 +470,21 @@ Spec Spec::load(const std::string & path)
       "; rename one so each stage has its own name");
   }
 
+  for (std::size_t i = 0; i < spec.stages_.size(); ++i) {
+    for (std::size_t j = i + 1; j < spec.stages_.size(); ++j) {
+      const Stage & a = spec.stages_[i];
+      const Stage & b = spec.stages_[j];
+      if (
+        a.holds.empty() || a.node != b.node || a.holds.subscription != b.holds.subscription ||
+        a.holds.service != b.holds.service) {
+        continue;
+      }
+      fail(
+        "stages " + detail::stage_name(a) + " and " + detail::stage_name(b) +
+        " hold the same thing, so both would name one group");
+    }
+  }
+
   for (const auto & chain : chains) {
     check_flow(spec.stages_, chain);
     check_release(spec.stages_, chain);
@@ -466,6 +522,44 @@ const Stage & Spec::stage(const std::string & target, const std::string & group)
       "' in the spec; a label the file never names is a typo, and applying nothing would hide it");
   }
   return *st;
+}
+
+namespace
+{
+bool holds_it(const GroupContent & g, const Holds & h)
+{
+  const auto & names = h.subscription.empty() ? g.services : g.subscriptions;
+  const auto & name = h.subscription.empty() ? h.service : h.subscription;
+  return std::find(names.begin(), names.end(), name) != names.end();
+}
+}  // namespace
+
+std::vector<const Stage *> Spec::declared(
+  const std::string & node, const std::vector<GroupContent> & groups) const
+{
+  std::vector<const Stage *> out(groups.size(), nullptr);
+  for (const Stage & st : stages_) {
+    if (st.node != node || st.external || !st.match.empty()) continue;
+    if (st.holds.empty() && !st.group.empty()) continue;
+    std::vector<std::size_t> hit;
+    for (std::size_t g = 0; g < groups.size(); ++g) {
+      const bool mine = st.holds.empty() ? groups[g].is_default : holds_it(groups[g], st.holds);
+      if (mine) hit.push_back(g);
+    }
+    if (hit.size() > 1) {
+      fail(
+        "stage " + detail::stage_name(st) + " names " + std::to_string(hit.size()) +
+        " callback groups of " + node + "; refusing to guess");
+    }
+    if (hit.empty()) continue;
+    if (out[hit[0]] != nullptr) {
+      fail(
+        "stages " + detail::stage_name(*out[hit[0]]) + " and " + detail::stage_name(st) +
+        " both name one callback group of " + node + "; one group is one thread");
+    }
+    out[hit[0]] = &st;
+  }
+  return out;
 }
 
 std::vector<const Stage *> Spec::external() const
@@ -646,6 +740,13 @@ std::string detail::record_bindings(const std::vector<Binding> & held)
   return record::publish(record::Writer::Daemon, entries);
 }
 
+Report detail::verify_now_at(const std::string & root, int tid, const ThreadState & st)
+{
+  Report rep;
+  host::verify_now(rep, host::Fs(root), tid, st);
+  return rep;
+}
+
 std::string detail::daemon_dir()
 {
   std::string why;
@@ -670,6 +771,14 @@ Report bind(const std::string & target, const std::string & group)
   const Spec spec = Spec::load();
   if (spec.empty()) return Report{};
   return apply_checked(spec.stage(target, group));
+}
+
+std::optional<Report> bind_declared(const std::string & target, const std::string & group)
+{
+  const Spec spec = Spec::load();
+  const Stage * st = spec.find(target, group);
+  if (st == nullptr || st->external || !st->match.empty()) return std::nullopt;
+  return apply_checked(*st);
 }
 
 namespace
@@ -829,7 +938,7 @@ Report verify(const Stage & stage, int tid, std::chrono::milliseconds window)
       "stage " + where + " declares cpus " + cpu_list(stage.opts.cpus) +
         " and its thread may run on " + cpu_list(st.cpus));
   }
-  host::verify_now(rep, tid, st);
+  host::verify_now(rep, host::Fs{}, tid, st);
   if (window.count() > 0) host::verify_window(rep, stage, tid, window);
   return rep;
 }

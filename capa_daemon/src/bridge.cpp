@@ -53,6 +53,7 @@ rust::Vec<Stage> stages(const capa::Spec & spec)
     s.external = st.external;
     s.matcher.irq = st.match.irq;
     s.matcher.process = st.match.process;
+    s.matcher.arg = st.match.arg;
     s.matcher.thread = st.match.thread;
     s.cpus = to_rust(st.opts.cpus);
     s.children_cpus = to_rust(st.children_cpus);

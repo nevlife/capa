@@ -789,12 +789,12 @@ chains:
   EXPECT_EQ(rep.find("priority-order")->verdict, capa::Verdict::Ok) << rep.to_string();
 }
 
-// The user documents show chain files. A fence that no longer loads teaches a file the parser
+// The user document shows chain files. A fence that no longer loads teaches a file the parser
 // refuses, so every yaml fence in them is loaded here.
 TEST(Docs, EveryChainFileInTheUserDocumentsLoads)
 {
   int fences = 0;
-  for (const char * doc : {"/en/api.en.md", "/ko/api.ko.md"}) {
+  for (const char * doc : {"/api.md"}) {
     std::ifstream in(std::string(CAPA_DOCS_DIR) + doc);
     ASSERT_TRUE(in) << doc;
     std::string line;
@@ -814,7 +814,7 @@ TEST(Docs, EveryChainFileInTheUserDocumentsLoads)
       }
     }
   }
-  EXPECT_GE(fences, 4) << "the documents lost their examples";
+  EXPECT_GE(fences, 4) << "the document lost its examples";
 }
 
 TEST(Spec, EqualCriticalityOrDisjointCpusBindNoOrderBetweenChains)
@@ -880,12 +880,24 @@ TEST(Spec, AMatchNamesAnInterruptOrAProcessAndThread)
                "thread: dds.recv}, cpus: [2]}]}}"),
     "<loaded>");
 
+  EXPECT_EQ(
+    load_error("chains: {c: {target: soft, stages: [{name: rx, match: {arg: "
+               "\"__node:=planning\", thread: recvUC}, cpus: [2]}]}}"),
+    "<loaded>");
+  EXPECT_EQ(
+    load_error("chains: {c: {target: soft, stages: [{name: rx, match: {process: agnocast_compon, "
+               "arg: \"__node:=planning\", thread: recvUC}, cpus: [2]}]}}"),
+    "<loaded>");
+
   for (const char * bad : {
-         "{name: a, match: {irq: x, thread: y}, cpus: [2]}",  // both forms
-         "{name: a, match: {process: cam}, cpus: [2]}",       // half of one
-         "{name: a, match: {irq: x, prio: 3}, cpus: [2]}",    // unknown key
-         "{name: a, match: {irq: x}}",                        // nothing to set
-         "{name: a, external: true, match: {irq: x}}",        // nobody sets an external one
+         "{name: a, match: {irq: x, thread: y}, cpus: [2]}",          // both forms
+         "{name: a, match: {process: cam}, cpus: [2]}",               // half of one
+         "{name: a, match: {arg: x}, cpus: [2]}",                     // no thread
+         "{name: a, match: {irq: x, arg: y}, cpus: [2]}",             // an irq has no argv
+         "{name: a, match: {arg: \"a\\tb\", thread: y}, cpus: [2]}",  // not a state file field
+         "{name: a, match: {irq: x, prio: 3}, cpus: [2]}",            // unknown key
+         "{name: a, match: {irq: x}}",                                // nothing to set
+         "{name: a, external: true, match: {irq: x}}",                // nobody sets an external one
        }) {
     EXPECT_NE(
       load_error(std::string("chains: {c: {target: soft, stages: [") + bad + "]}}"), "<loaded>")
@@ -1008,4 +1020,127 @@ chains:
   t.join();
   ASSERT_NE(rep.find("io-uring"), nullptr);
   EXPECT_EQ(rep.find("io-uring")->verdict, capa::Verdict::Warn);
+}
+
+TEST(Spec, HoldsNamesAGroupByWhatItHolds)
+{
+  EXPECT_EQ(
+    load_error("chains: {c: {target: soft, stages: [{node: /mvp, group: traj, holds: "
+               "{subscription: /traj}, cpus: [2]}, {node: /mvp, group: srv, holds: "
+               "{service: /mvp/set}, cpus: [2]}]}}"),
+    "<loaded>");
+  for (const char * bad : {
+         "{node: /a, holds: {subscription: /t}}",                         // no label
+         "{name: a, holds: {subscription: /t}}",                          // not a node
+         "{node: /a, group: g, holds: {subscription: t}}",                // not resolved
+         "{node: /a, group: g, holds: {subscription: /t, service: /s}}",  // one thing
+         "{node: /a, group: g, holds: {}}",
+         "{node: /a, group: g, holds: {timer: 100}}",
+         "{node: /a, group: g, external: true, holds: {subscription: /t}}",
+         // NOLINTNEXTLINE(bugprone-suspicious-missing-comma): one entry, split for length
+         "{node: /a, group: g, holds: {subscription: /t}, match: {process: p, thread: t}, "
+         "cpus: [2]}",
+       }) {
+    EXPECT_NE(
+      load_error(std::string("chains: {c: {target: soft, stages: [") + bad + "]}}"), "<loaded>")
+      << bad;
+  }
+  EXPECT_NE(
+    load_error("chains: {c: {target: soft, stages: [{node: /a, group: x, holds: {subscription: "
+               "/t}}, {node: /a, group: y, holds: {subscription: /t}}]}}")
+      .find("hold the same thing"),
+    std::string::npos);
+}
+
+namespace
+{
+capa::GroupContent group(std::vector<std::string> subs, bool is_default = false)
+{
+  capa::GroupContent g;
+  g.is_default = is_default;
+  g.subscriptions = std::move(subs);
+  return g;
+}
+
+constexpr const char * kPlanner = R"(
+chains:
+  c:
+    target: soft
+    stages:
+      - {node: /mvp, cpus: [0]}
+      - {node: /mvp, group: traj, holds: {subscription: /path_optimizer/trajectory}, cpus: [0]}
+      - {node: /mvp, group: by_label, cpus: [0]}
+      - {node: /mvp, group: ext, external: true}
+      - {node: /other, holds: {subscription: /x}, group: x, cpus: [0]}
+)";
+}  // namespace
+
+// Autoware's motion_velocity_planner did its work in its eighth group; numbering groups by
+// creation order named it "cg7", and one more group in the node code would move that silently.
+TEST(Spec, DeclaredFindsAGroupByItsContentNotItsPosition)
+{
+  SpecFile f(kPlanner);
+  const auto spec = capa::Spec::load(f.path());
+  std::vector<capa::GroupContent> groups = {
+    group({"/odom"}, true), group({"/map"}), group({"/path_optimizer/trajectory"})};
+  auto got = spec.declared("/mvp", groups);
+  ASSERT_EQ(got.size(), 3u);
+  ASSERT_NE(got[0], nullptr);
+  EXPECT_EQ(got[0]->group, "");
+  EXPECT_EQ(got[1], nullptr) << "a group no stage declares";
+  ASSERT_NE(got[2], nullptr);
+  EXPECT_EQ(got[2]->group, "traj");
+
+  groups.insert(groups.begin() + 1, group({"/new"}));
+  got = spec.declared("/mvp", groups);
+  ASSERT_NE(got[3], nullptr);
+  EXPECT_EQ(got[3]->group, "traj") << "one more group does not move the stage";
+
+  EXPECT_EQ(spec.declared("/nobody", groups), std::vector<const capa::Stage *>(4, nullptr));
+}
+
+TEST(Spec, DeclaredRefusesToGuess)
+{
+  SpecFile f(kPlanner);
+  const auto spec = capa::Spec::load(f.path());
+  EXPECT_THROW(
+    spec.declared(
+      "/mvp", {group({}, true), group({"/path_optimizer/trajectory"}),
+               group({"/path_optimizer/trajectory"})}),
+    std::runtime_error)
+    << "two groups hold the subscription";
+  EXPECT_THROW(
+    spec.declared("/mvp", {group({"/path_optimizer/trajectory"}, true)}), std::runtime_error)
+    << "the default group is claimed by the default stage and by the holds stage";
+}
+
+TEST(Bind, BindDeclaredBindsOnlyWhatTheFileDeclares)
+{
+  const auto allowed = capa::current().cpus;
+  ASSERT_FALSE(allowed.empty());
+  ::unsetenv("CAPA_SPEC");
+  std::thread([] { EXPECT_FALSE(capa::bind_declared("/bind_node", "work")); }).join();
+
+  SpecFile f(
+    pin_spec(allowed.back()) +
+    "      - {node: /bind_node, group: ext, external: true}\n"
+    "      - {name: rx, match: {process: p, thread: t}, cpus: [0]}\n");
+  SpecEnv env(f.path());
+  std::vector<std::uint32_t> before;
+  std::vector<std::uint32_t> after;
+  std::thread([&] {
+    before = capa::current().cpus;
+    EXPECT_FALSE(capa::bind_declared("/bind_node", "wrok"));
+    EXPECT_FALSE(capa::bind_declared("/bind_node", "ext"));
+    EXPECT_FALSE(capa::bind_declared("rx"));
+    after = capa::current().cpus;
+  }).join();
+  EXPECT_EQ(after, before) << "nothing undeclared was applied";
+
+  std::thread([&] {
+    const auto rep = capa::bind_declared("/bind_node", "work");
+    EXPECT_TRUE(rep.has_value());
+    after = capa::current().cpus;
+  }).join();
+  EXPECT_EQ(after, std::vector<std::uint32_t>{allowed.back()});
 }

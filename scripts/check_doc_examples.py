@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The code fences of the user documents are the compiled example regions, code for code.
+"""The code fences of the user document are the compiled example regions, code for code.
 
 A fence written ```cpp doc:<id> or ```python doc:<id> must equal the region between [doc:<id>] and
-[doc:/<id>] in an example source, comments and blank lines aside (the Korean document comments in
-Korean; the sources may not). The sources are compiled (capa_example) and name-checked
+[doc:/<id>] in an example source, comments and blank lines aside (the document comments in Korean;
+the sources may not). The sources are compiled (capa_example) and name-checked
 (capa_py/test/test_doc_examples.py), so a fence that drifts from them is a fence nothing checks.
-Every region needs a fence in both documents, and every fence a region.
+Every region needs a fence, and every fence a region.
 """
 
 import re
@@ -14,7 +14,7 @@ import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOCS = (ROOT / "docs" / "en" / "api.en.md", ROOT / "docs" / "ko" / "api.ko.md")
+DOC = ROOT / "docs" / "api.md"
 SOURCES = (
     ROOT / "capa_example" / "src" / "doc_api.cpp",
     ROOT / "capa_py" / "examples" / "doc_api.py",
@@ -42,18 +42,17 @@ def main():
         for rid, body in REGION.findall(src.read_text()):
             regions[rid] = (lang, code(body, lang))
     errors = []
-    for doc in DOCS:
-        rel = doc.relative_to(ROOT)
-        fenced = set()
-        for lang, rid, body in FENCE.findall(doc.read_text()):
-            fenced.add(rid)
-            if rid not in regions:
-                errors.append(f"{rel}: fence doc:{rid} has no [doc:{rid}] region in the examples")
-                continue
-            if regions[rid][0] != lang or regions[rid][1] != code(body, lang):
-                errors.append(f"{rel}: fence doc:{rid} differs from its example region")
-        for rid in sorted(set(regions) - fenced):
-            errors.append(f"{rel}: region [doc:{rid}] has no fence")
+    rel = DOC.relative_to(ROOT)
+    fenced = set()
+    for lang, rid, body in FENCE.findall(DOC.read_text()):
+        fenced.add(rid)
+        if rid not in regions:
+            errors.append(f"{rel}: fence doc:{rid} has no [doc:{rid}] region in the examples")
+            continue
+        if regions[rid][0] != lang or regions[rid][1] != code(body, lang):
+            errors.append(f"{rel}: fence doc:{rid} differs from its example region")
+    for rid in sorted(set(regions) - fenced):
+        errors.append(f"{rel}: region [doc:{rid}] has no fence")
     for e in errors:
         print(e, file=sys.stderr)
     return 1 if errors else 0

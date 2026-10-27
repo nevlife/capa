@@ -333,3 +333,89 @@ def test_a_stage_must_name_the_node_and_its_unit(node, tmp_path):
         capa.flux.apply_checked(ex, node, None, spec.stage("/control_node", "loop"))
     with pytest.raises(ValueError, match="default unit"):
         capa.flux.apply_checked(ex, node, None, spec.stage("/flux_rt_test", "infer"))
+
+
+def _holds_spec(tmp_path, first, last):
+    path = tmp_path / "holds.yaml"
+    path.write_text(
+        "chains:\n"
+        "  c:\n"
+        "    target: soft\n"
+        "    stages:\n"
+        f"      - {{node: /flux_rt_test, cpus: [{first}]}}\n"
+        "      - node: /flux_rt_test\n"
+        "        group: traj\n"
+        "        holds: {subscription: /pytest/holds/traj}\n"
+        f"        cpus: [{last}]\n"
+    )
+    return str(path)
+
+
+def test_declared_finds_the_group_by_what_it_holds(node, tmp_path):
+    from std_msgs.msg import UInt64
+
+    other = MutuallyExclusiveCallbackGroup()
+    traj = MutuallyExclusiveCallbackGroup()
+    node.create_subscription(UInt64, "/pytest/holds/map", lambda _m: None, 10, callback_group=other)
+    node.create_subscription(UInt64, "/pytest/holds/traj", lambda _m: None, 10, callback_group=traj)
+    spec = capa.Spec.load(_holds_spec(tmp_path, 0, 0))
+
+    assert capa.flux.content(node, traj).subscriptions == ["/pytest/holds/traj"]
+    assert capa.flux.declared(spec, node, traj).group == "traj"
+    assert capa.flux.declared(spec, node, other) is None
+    assert capa.flux.declared(spec, node, None).group == ""
+
+
+# rclpy runs every group of a node on the node's one ROS thread here, so the stage of the group
+# that holds the subscription is the node thread's.
+@needs_two_cpus
+def test_bind_declared_reaches_the_node_unit(node, tmp_path, monkeypatch):
+    from std_msgs.msg import UInt64
+
+    target = spare_cpus[-1]
+    path = tmp_path / "unit.yaml"
+    path.write_text(
+        "chains: {c: {target: soft, stages: [{node: /flux_rt_test, group: traj, "
+        f"holds: {{subscription: /pytest/holds/traj}}, cpus: [{target}]}}]}}}}\n"
+    )
+    monkeypatch.setenv("CAPA_SPEC", str(path))
+    seen = []
+    node.create_subscription(
+        UInt64,
+        "/pytest/holds/traj",
+        lambda _m: seen.append(capa.current().cpus),
+        10,
+        callback_group=MutuallyExclusiveCallbackGroup(),
+    )
+    pub = node.create_publisher(UInt64, "/pytest/holds/traj", 10)
+
+    ex = flux.PartitionedExecutor()
+    ex.add_node(node)
+    capa.flux.bind_declared(ex, node)
+
+    t = spin_in_thread(ex)
+    try:
+        deadline = time.monotonic() + 5.0
+        while not seen and time.monotonic() < deadline:
+            pub.publish(UInt64())
+            time.sleep(0.01)
+        assert seen, "the subscription never ran"
+        assert seen[0] == [target]
+    finally:
+        ex.stop()
+        t.join(timeout=10.0)
+
+
+def test_bind_declared_refuses_two_stages_on_the_node_thread(node, tmp_path, monkeypatch):
+    from std_msgs.msg import UInt64
+
+    node.create_subscription(
+        UInt64,
+        "/pytest/holds/traj",
+        lambda _m: None,
+        10,
+        callback_group=MutuallyExclusiveCallbackGroup(),
+    )
+    monkeypatch.setenv("CAPA_SPEC", _holds_spec(tmp_path, spare_cpus[0], spare_cpus[0]))
+    with pytest.raises(ValueError, match="one ROS thread"):
+        capa.flux.bind_declared(flux.PartitionedExecutor(), node)

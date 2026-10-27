@@ -558,3 +558,105 @@ fn finds_an_interrupt_thread_by_its_handler_name() {
     assert_eq!(find_threads(&irq("nvme0q1"), &roots), [(4103, 4103)]);
     fs::remove_dir_all(&root).unwrap();
 }
+
+// Every Autoware container's comm was "agnocast_compon", so a match by comm alone named them all.
+// One whole argv element tells them apart; a longer element that merely contains it does not.
+#[test]
+fn finds_a_process_by_one_argument_element() {
+    let root =
+        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("arg_{}", std::process::id()));
+    let put = |rel: &str, bytes: &[u8]| {
+        let path = root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    };
+    for (pid, node) in [
+        (500, "__node:=behavior_planning_container"),
+        (600, "__node:=motion_planning_container"),
+        (700, "x__node:=behavior_planning_container"),
+    ] {
+        put(&format!("proc/{pid}/comm"), b"agnocast_compon\n");
+        let cmdline = format!("/opt/component_container\0--ros-args\0-r\0{node}\0");
+        put(&format!("proc/{pid}/cmdline"), cmdline.as_bytes());
+        put(&format!("proc/{pid}/task/{pid}/comm"), b"agnocast_compon\n");
+        put(&format!("proc/{pid}/task/{}/comm", pid + 1), b"recvUC\n");
+    }
+    let roots = Roots {
+        proc: root.join("proc"),
+        sys_irq: root.join("sys"),
+    };
+    let by = |process: &str, arg: &str| Match {
+        process: process.to_owned(),
+        arg: arg.to_owned(),
+        thread: "recvUC".to_owned(),
+        ..Match::default()
+    };
+    assert_eq!(
+        find_threads(&by("agnocast_compon", ""), &roots).len(),
+        3,
+        "comm alone names every container"
+    );
+    let planning = "__node:=behavior_planning_container";
+    assert_eq!(find_threads(&by("", planning), &roots), [(500, 501)]);
+    assert_eq!(
+        find_threads(&by("agnocast_compon", planning), &roots),
+        [(500, 501)]
+    );
+    assert!(find_threads(&by("other", planning), &roots).is_empty());
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn sets_a_thread_found_by_an_argument_of_its_process() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let argv0 = env::args().next().unwrap();
+    let t = Target::new("capad_t_arg");
+    let f = SpecFile::new(&format!(
+        "chains:\n  c:\n    target: soft\n    stages:\n      - name: tgt\n        \
+         match: {{arg: \"{argv0}\", thread: capad_t_arg}}\n        cpus: [{last}]\n"
+    ));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let lines = rec.pass();
+    assert!(contains(&lines, "tgt: set on pid"), "{lines:?}");
+    assert_eq!(ffi::observe(t.tid).unwrap().cpus, [last]);
+    rec.restore();
+}
+
+// A capad updated while its previous run had crashed reads that run's state file, written before
+// owned lines carried `arg`.
+#[test]
+fn a_restart_reads_the_state_file_of_the_previous_format() {
+    let _serial = serial();
+    let last = *cpus().last().unwrap();
+    let t = Target::new("capad_t_v1");
+    let original = ffi::observe(t.tid).unwrap();
+    let pid = i32::try_from(std::process::id()).unwrap();
+    let start = ffi::task_starttime(pid, t.tid);
+    let cpus_text: Vec<String> = original.cpus.iter().map(u32::to_string).collect();
+    let v1 = format!(
+        "capad-state 1\nowned\ttgt\t{pid}\t{}\t{start}\t{}\t{}\t{}\t{}\t\t{}\tcapad_t_v1\n",
+        t.tid,
+        original.policy,
+        original.priority,
+        cpus_text.join(","),
+        u8::from(original.reset_on_fork),
+        self_comm()
+    );
+    fs::write(
+        PathBuf::from(ffi::daemon_dir().unwrap()).join("capad.state"),
+        v1,
+    )
+    .unwrap();
+    ffi::move_to(t.tid, &[last]).unwrap();
+
+    let f = SpecFile::new(&match_spec("capad_t_v1", last));
+    let mut next = Reconciler::load(&f.path).unwrap();
+    let lines = next.recover();
+    assert!(!contains(&lines, "not understood"), "{lines:?}");
+    assert!(!contains(&lines, "not a capad state file"), "{lines:?}");
+    next.pass();
+    let lines = next.restore();
+    assert!(contains(&lines, "put back"), "{lines:?}");
+    assert_eq!(ffi::observe(t.tid).unwrap().cpus, original.cpus);
+}

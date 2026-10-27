@@ -75,7 +75,7 @@ void preflight_into(
   Report & rep, const Fs & fs, int tid, const Options & opts, int control, Strictness strict);
 Report preflight_spec(const Fs & fs, const Spec & spec);
 
-void verify_now(Report & rep, int tid, const ThreadState & st);
+void verify_now(Report & rep, const Fs & fs, int tid, const ThreadState & st);
 void verify_window(Report & rep, const Stage & stage, int tid, std::chrono::milliseconds window);
 
 }  // namespace capa::host

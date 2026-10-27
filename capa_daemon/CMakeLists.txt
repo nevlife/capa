@@ -17,7 +17,7 @@ endif()
 find_program(CARGO cargo PATHS ${cargo_home}/bin NO_DEFAULT_PATH)
 find_program(CARGO cargo)
 if(NOT CARGO)
-  message(FATAL_ERROR "cargo not found: install rustup (docs/en/daemon.en.md, Building)")
+  message(FATAL_ERROR "cargo not found: install rustup (docs/daemon.md)")
 endif()
 
 if(TARGET yaml-cpp::yaml-cpp)

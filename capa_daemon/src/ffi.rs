@@ -6,6 +6,7 @@ mod bridge {
     struct Match {
         irq: String,
         process: String,
+        arg: String,
         thread: String,
     }
 
@@ -90,6 +91,9 @@ pub use bridge::*;
 
 impl Match {
     pub fn is_empty(&self) -> bool {
-        self.irq.is_empty() && self.process.is_empty() && self.thread.is_empty()
+        self.irq.is_empty()
+            && self.process.is_empty()
+            && self.arg.is_empty()
+            && self.thread.is_empty()
     }
 }

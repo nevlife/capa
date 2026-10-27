@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(capa_py VERSION 0.0.0 LANGUAGES CXX)
 
 # capa_py is the nanobind Python binding over capa_core, plus capa.flux, the pure-Python adapter
-# for flux.PartitionedExecutor. nanobind is vendored as a submodule at the repo root.
+# for flux.PartitionedExecutor, and the `capa` command (capa.cli). nanobind is vendored as a
+# submodule at the repo root.
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
@@ -49,6 +50,10 @@ nanobind_add_stub(
 install(TARGETS _capa LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}/capa")
 install(FILES capa/__init__.py capa/flux.py capa/_capa.pyi capa/py.typed
         DESTINATION "${PYTHON_INSTALL_DIR}/capa")
+install(FILES capa/cli/__init__.py capa/cli/main.py capa/cli/format.py
+        DESTINATION "${PYTHON_INSTALL_DIR}/capa/cli")
+# Installed to bin: a command a person types, which needs no ROS and so is not behind `ros2 run`.
+install(PROGRAMS scripts/capa DESTINATION bin)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
@@ -57,6 +62,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_flux test/test_flux.py ENV CAPA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
   ament_add_pytest_test(test_surface test/test_surface.py)
   ament_add_pytest_test(test_doc_examples test/test_doc_examples.py)
+  ament_add_pytest_test(test_cli test/test_cli.py ENV CAPA_RUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/run)
   # The repository checks that need no build, run here as well so colcon test holds them without
   # pre-commit installed.
   foreach(check check_api_docs check_contracts check_doc_examples)

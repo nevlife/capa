@@ -5,7 +5,8 @@
   <version>0.0.0</version>
   <description>
     capa Python binding (nanobind): thread scheduling for the calling thread and the chain
-    declaration file, plus capa.flux for flux.PartitionedExecutor threads.
+    declaration file, capa.flux for flux.PartitionedExecutor threads, and the `capa` command,
+    which checks a chain file against this host and shows which thread holds each stage.
   </description>
   <maintainer email="nevlife000720@gmail.com">nevlife</maintainer>
   <license>MIT</license>
@@ -21,6 +22,7 @@
   <test_depend>python3-numpy</test_depend>
   <test_depend>python3-pytest</test_depend>
   <test_depend>rclpy</test_depend>
+  <test_depend>std_msgs</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

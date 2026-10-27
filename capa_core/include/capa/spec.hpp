@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <exception>
 #include <future>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -23,15 +24,37 @@ struct Match
 {
   std::string irq;      // /sys/kernel/irq/<n>/actions, e.g. "3550000.usb"
   std::string process;  // /proc/<pid>/comm of the owning process
+  std::string arg;      // one whole element of /proc/<pid>/cmdline of the owning process
   std::string thread;   // /proc/<pid>/task/<tid>/comm
 
-  bool empty() const noexcept { return irq.empty() && process.empty() && thread.empty(); }
+  bool empty() const noexcept
+  {
+    return irq.empty() && process.empty() && arg.empty() && thread.empty();
+  }
+};
+
+// Names a callback group by what it holds, for groups that have no name of their own.
+struct Holds
+{
+  std::string subscription;  // resolved topic name
+  std::string service;       // resolved service name
+
+  bool empty() const noexcept { return subscription.empty() && service.empty(); }
+};
+
+// What one callback group of a node holds, as Spec::declared() reads it.
+struct GroupContent
+{
+  bool is_default = false;
+  std::vector<std::string> subscriptions;
+  std::vector<std::string> services;
 };
 
 struct Stage
 {
   std::string node;   // fully-qualified ROS node name; empty for a `name` stage
   std::string group;  // group label; empty means the node's default callback group
+  Holds holds;        // set: the group is the one of `node` holding this
   std::string name;   // a non-ROS thread; empty for a `node` stage
   Kind kind = Kind::Worker;
   bool external = false;
@@ -75,6 +98,13 @@ public:
 
   std::vector<const Stage *> external() const;
 
+  // For each of `groups`, every callback group of `node`, the stage the file declares for it, or
+  // nullptr: a stage with no group for the default one, a `holds` stage for the group that holds
+  // its subscription or service. A stage named by label alone, an external one and a matched one
+  // are not resolved here. Throws when one group is claimed twice or one stage by two groups.
+  std::vector<const Stage *> declared(
+    const std::string & node, const std::vector<GroupContent> & groups) const;
+
 private:
   friend const std::vector<std::vector<std::size_t>> & detail::chains(const Spec & spec);
   std::vector<Stage> stages_;
@@ -85,6 +115,10 @@ private:
 Report apply_checked(const Stage & stage);
 
 Report bind(const std::string & target, const std::string & group = "");
+
+// bind() for a caller that binds every thread it starts: nullopt, and nothing applied, when the
+// file declares no stage there that a thread binds itself (none, external, or matched).
+std::optional<Report> bind_declared(const std::string & target, const std::string & group = "");
 
 template <class F>
 std::thread spawn(const std::string & target, const std::string & group, F && fn)
@@ -151,6 +185,8 @@ std::vector<HeldStage> held_stages();
 
 // preflight(spec) with every /proc and /sys path read under `root`, for tests on host snapshots.
 Report preflight_at(const std::string & root, const Spec & spec);
+// The findings verify() reads from /proc about thread `tid` in state `st`, under `root`.
+Report verify_now_at(const std::string & root, int tid, const ThreadState & st);
 
 // CAPA_DAEMON_DIR (default /run/capa), created if missing. Throws std::runtime_error when it is
 // not this user's or others can write it.
