@@ -34,20 +34,20 @@ struct Process
 enum class Writer : std::uint8_t { Bind, Daemon };
 
 // The first call creates the record and sweeps this user's dead ones. Returns why it failed, or "".
-std::string publish(Writer writer, const std::vector<Entry> & entries);
+auto publish(Writer writer, const std::vector<Entry> & entries) -> std::string;
 
 // In a forked child: the records are the parent's, so drop them without touching the files.
 void forget_after_fork() noexcept;
 
 // Only records a reader believes; entries whose thread is gone or recycled are left out.
-std::vector<Process> read_live();
+auto read_live() -> std::vector<Process>;
 
-std::vector<Task> tasks_of(int pid);
+auto tasks_of(int pid) -> std::vector<Task>;
 
 // Created if missing. Empty, with `why` set, when it is not this user's alone.
-std::string daemon_dir(std::string & why);
+auto daemon_dir(std::string & why) -> std::string;
 
-std::uint64_t task_starttime(int pid, int tid);
+auto task_starttime(int pid, int tid) -> std::uint64_t;
 
 }  // namespace capa::record
 

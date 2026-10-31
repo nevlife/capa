@@ -21,7 +21,9 @@ rclcpp::CallbackGroup::SharedPtr owned_group(
   rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const char * caller)
 {
   const auto base = node.get_node_base_interface();
-  if (!group) return base->get_default_callback_group();
+  if (!group) {
+    return base->get_default_callback_group();
+  }
   bool owned = false;
   base->for_each_callback_group(
     [&](const rclcpp::CallbackGroup::SharedPtr & g) { owned = owned || g == group; });
@@ -91,7 +93,9 @@ std::vector<const Stage *> resolve(
 {
   std::vector<GroupContent> contents;
   contents.reserve(groups.size());
-  for (const auto & g : groups) contents.push_back(content(node, g));
+  for (const auto & g : groups) {
+    contents.push_back(content(node, g));
+  }
   return spec.declared(node.get_fully_qualified_name(), contents);
 }
 
@@ -104,7 +108,9 @@ std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>> declared
   const auto stages = resolve(spec, node, groups);
   std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>> out;
   for (std::size_t i = 0; i < groups.size(); ++i) {
-    if (stages[i] != nullptr) out.emplace_back(groups[i], stages[i]);
+    if (stages[i] != nullptr) {
+      out.emplace_back(groups[i], stages[i]);
+    }
   }
   return out;
 }
@@ -127,7 +133,9 @@ GroupContent content(
     [](const rclcpp::ClientBase::SharedPtr &) {}, [](const rclcpp::TimerBase::SharedPtr &) {},
     [&](const rclcpp::Waitable::SharedPtr & w) {
       const auto member = std::dynamic_pointer_cast<::flux::detail::GroupMember>(w);
-      if (!member) return;
+      if (!member) {
+        return;
+      }
       if (const auto * s = dynamic_cast<const ::flux::Subscription *>(&member->source())) {
         c.subscriptions.push_back(s->topic_name());
       }

@@ -120,7 +120,9 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
     s.sub = s.node->create_subscription<std_msgs::msg::UInt64>(
       "/rtchain/tick", 10,
       [&s](const std_msgs::msg::UInt64 &) {
-        if (!s.seen.exchange(true)) s.observed = capa::current();
+        if (!s.seen.exchange(true)) {
+          s.observed = capa::current();
+        }
       },
       opts);
     ex.add_node(s.node);
@@ -144,7 +146,9 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
   const auto deadline = std::chrono::steady_clock::now() + 5s;
   std_msgs::msg::UInt64 m;
   while (std::chrono::steady_clock::now() < deadline) {
-    if (stages[0].seen.load() && stages[1].seen.load() && stages[2].seen.load()) break;
+    if (stages[0].seen.load() && stages[1].seen.load() && stages[2].seen.load()) {
+      break;
+    }
     pub->publish(m);
     std::this_thread::sleep_for(2ms);
   }
@@ -248,9 +252,13 @@ TEST(Chain, VerifySeesADriftAwayFromTheDeclaration)
     capa::apply_checked(*st);
     tid.store(capa::this_tid());
     ready.store(true);
-    while (!stop.load()) std::this_thread::sleep_for(1ms);
+    while (!stop.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
   });
-  while (!ready.load()) std::this_thread::sleep_for(1ms);
+  while (!ready.load()) {
+    std::this_thread::sleep_for(1ms);
+  }
 
   const capa::Report before = capa::verify(*st, tid.load());
   EXPECT_TRUE(before.ok()) << before.to_string();
@@ -282,7 +290,9 @@ TEST(Chain, VerifySeesADriftAwayFromTheDeclaration)
 TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
 {
   const auto allowed = capa::current().cpus;
-  if (allowed.size() < 2) GTEST_SKIP() << "capa-cap:two-cpus needs two cpus to declare in reverse";
+  if (allowed.size() < 2) {
+    GTEST_SKIP() << "capa-cap:two-cpus needs two cpus to declare in reverse";
+  }
   const std::uint32_t lo = allowed[0];
   const std::uint32_t hi = allowed[1];
 
@@ -301,9 +311,13 @@ TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
     capa::apply_checked(*st);
     tid.store(capa::this_tid());
     ready.store(true);
-    while (!stop.load()) std::this_thread::sleep_for(1ms);
+    while (!stop.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
   });
-  while (!ready.load()) std::this_thread::sleep_for(1ms);
+  while (!ready.load()) {
+    std::this_thread::sleep_for(1ms);
+  }
 
   const capa::Report reversed = capa::verify(*st, tid.load());
   ASSERT_NE(reversed.find("observed-cpus"), nullptr);
@@ -328,7 +342,9 @@ TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
 TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
 {
   const auto allowed = capa::current().cpus;
-  if (allowed.size() < 2) GTEST_SKIP() << "capa-cap:two-cpus needs a cpu outside the declaration";
+  if (allowed.size() < 2) {
+    GTEST_SKIP() << "capa-cap:two-cpus needs a cpu outside the declaration";
+  }
   const std::uint32_t declared = allowed[0];
   const std::uint32_t outside = allowed[1];
 
@@ -347,9 +363,13 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
     capa::apply_checked(*st);
     tid.store(capa::this_tid());
     ready.store(true);
-    while (!stop.load()) std::this_thread::sleep_for(1ms);
+    while (!stop.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
   });
-  while (!ready.load()) std::this_thread::sleep_for(1ms);
+  while (!ready.load()) {
+    std::this_thread::sleep_for(1ms);
+  }
 
   cpu_set_t other;
   CPU_ZERO(&other);
@@ -391,7 +411,9 @@ chains:
   std::atomic<int> helper_tid{0};
   auto park = [&] {
     ++started;
-    while (!stop.load()) std::this_thread::sleep_for(1ms);
+    while (!stop.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
   };
   std::thread holder([&] {
     capa::apply_checked(spec.stage("/rtchain_scan", "worker"));
@@ -414,7 +436,9 @@ chains:
     park();
     helper.join();
   });
-  while (started.load() < 4) std::this_thread::sleep_for(1ms);
+  while (started.load() < 4) {
+    std::this_thread::sleep_for(1ms);
+  }
 
   const capa::Report rep = capa::verify_process(spec);
   stop.store(true);
@@ -424,7 +448,9 @@ chains:
 
   auto named = [&](int tid) {
     for (const capa::Finding & f : rep.findings) {
-      if (f.detail.find("tid " + std::to_string(tid) + " ") != std::string::npos) return true;
+      if (f.detail.find("tid " + std::to_string(tid) + " ") != std::string::npos) {
+        return true;
+      }
     }
     return false;
   };
@@ -471,12 +497,18 @@ chains:
   std::thread foreign([&] {
     // Stands in for the thread's real owner: an rmw listener, a driver, a CUDA worker. capa never
     // sets this one, which is what `external` declares.
-    if (privileged) capa::detail::apply(as_owner_would);
+    if (privileged) {
+      capa::detail::apply(as_owner_would);
+    }
     tid.store(capa::this_tid());
     ready.store(true);
-    while (!stop.load()) std::this_thread::sleep_for(1ms);
+    while (!stop.load()) {
+      std::this_thread::sleep_for(1ms);
+    }
   });
-  while (!ready.load()) std::this_thread::sleep_for(1ms);
+  while (!ready.load()) {
+    std::this_thread::sleep_for(1ms);
+  }
 
   const capa::Report seen = capa::verify(*st, tid.load());
   ASSERT_NE(seen.find("observed-priority"), nullptr);

@@ -48,13 +48,13 @@ struct ThreadState
   std::vector<std::uint32_t> cpus;
   bool reset_on_fork = false;  // SCHED_RESET_ON_FORK, split out of the kernel's policy value
 };
-ThreadState current();
+auto current() -> ThreadState;
 
-int this_tid();
+auto this_tid() -> int;
 
 // Throws std::system_error when the thread cannot be read, an exited one included: a thread that
 // is gone must not read as a thread at the wrong priority.
-ThreadState observe(int tid);
+auto observe(int tid) -> ThreadState;
 
 // Info is a fact worth knowing that blocks nothing, at any strictness.
 enum class Verdict : std::uint8_t { Ok, Warn, Fail, Unknown, Info };
@@ -76,31 +76,33 @@ struct Report
 {
   std::vector<Finding> findings;
 
-  bool ok() const;  // no Fail findings
-  const Finding * find(const char * id) const;
-  std::string to_string() const;
+  [[nodiscard]] auto ok() const -> bool;  // no Fail findings
+  auto find(const char * id) const -> const Finding *;
+  [[nodiscard]] auto to_string() const -> std::string;
 };
 
 // control_priority 0 reports `priority-order` Unknown: a check that did not run must not pass.
 // `strict` is how the request will be read: some findings are a Warn only for a hard stage.
-Report preflight(
-  const Options & opts, int control_priority = 0, Strictness strict = Strictness::Soft);
+auto preflight(const Options & opts, int control_priority = 0, Strictness strict = Strictness::Soft)
+  -> Report;
 
 // A blocking verdict throws before the thread is touched. The result is read back, since an
 // accepted request can still land elsewhere; a mismatch throws with the thread already changed.
-Report apply_checked(
-  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0);
+auto apply_checked(
+  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0) -> Report;
 
 namespace detail
 {
 // The daemon's, on thread `tid`: memory-lock is judged on its process; read-back is observe().
-Report preflight_to(
-  int tid, const Options & opts, int control_priority, Strictness strict = Strictness::Soft);
-Report apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority);
+auto preflight_to(
+  int tid, const Options & opts, int control_priority,
+  Strictness strict = Strictness::Soft) -> Report;
+auto apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority)
+  -> Report;
 // preflight_to with every /proc and /sys path read under `root`, for tests on host snapshots.
-Report preflight_at(
+auto preflight_at(
   const std::string & root, int tid, const Options & opts, int control_priority,
-  Strictness strict = Strictness::Soft);
+  Strictness strict = Strictness::Soft) -> Report;
 }  // namespace detail
 
 }  // namespace capa

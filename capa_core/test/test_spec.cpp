@@ -34,9 +34,9 @@ public:
     out << body;
   }
   SpecFile(const SpecFile &) = delete;
-  SpecFile & operator=(const SpecFile &) = delete;
+  auto operator=(const SpecFile &) -> SpecFile & = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
-  const std::string & path() const { return path_; }
+  [[nodiscard]] auto path() const -> const std::string & { return path_; }
 
 private:
   static int counter_;
@@ -286,12 +286,12 @@ TEST(Spec, LookupByNodeRejectsAnUnknownLabel)
   SpecFile f(kGood);
   const auto spec = capa::Spec::load(f.path());
 
-  EXPECT_NO_THROW(spec.stage("/perception_node", "infer"));
+  EXPECT_NO_THROW((void)spec.stage("/perception_node", "infer"));
   EXPECT_EQ(spec.stage("/perception_node", "infer").opts.priority, 75);
 
   // Silently applying nothing is how a typo survives to runtime.
-  EXPECT_THROW(spec.stage("/perception_node", "infr"), std::runtime_error);
-  EXPECT_THROW(spec.stage("/not_in_the_spec"), std::runtime_error);
+  EXPECT_THROW((void)spec.stage("/perception_node", "infr"), std::runtime_error);
+  EXPECT_THROW((void)spec.stage("/not_in_the_spec"), std::runtime_error);
 }
 
 TEST(Spec, NoEnvIsAnEmptySpec)
@@ -463,7 +463,7 @@ chains:
 namespace
 {
 
-std::string load_error(const std::string & body)
+auto load_error(const std::string & body) -> std::string
 {
   SpecFile f(body);
   try {
@@ -695,11 +695,11 @@ struct SpecEnv
 {
   explicit SpecEnv(const std::string & path) { ::setenv("CAPA_SPEC", path.c_str(), 1); }
   SpecEnv(const SpecEnv &) = delete;
-  SpecEnv & operator=(const SpecEnv &) = delete;
+  auto operator=(const SpecEnv &) -> SpecEnv & = delete;
   ~SpecEnv() { ::unsetenv("CAPA_SPEC"); }
 };
 
-std::string pin_spec(std::uint32_t cpu)
+auto pin_spec(std::uint32_t cpu) -> std::string
 {
   return "chains:\n  c:\n    target: soft\n    stages:\n      - node: /bind_node\n"
          "        group: work\n        cpus: [" +
@@ -780,7 +780,9 @@ chains:
   const capa::Report host = capa::preflight(spec.stage("/ord", "a").opts);
   const capa::Finding * perm = host.find("policy-permission");
   ASSERT_NE(perm, nullptr);
-  if (perm->verdict != capa::Verdict::Ok) GTEST_SKIP() << "capa-cap:rtprio no SCHED_FIFO here";
+  if (perm->verdict != capa::Verdict::Ok) {
+    GTEST_SKIP() << "capa-cap:rtprio no SCHED_FIFO here";
+  }
 
   capa::Report rep;
   std::thread t([&] { rep = capa::apply_checked(spec.stage("/ord", "a")); });
@@ -969,7 +971,9 @@ chains:
     tid.set_value(capa::this_tid());
     while (!stop) {
       std::vector<char> fresh(1 << 20);
-      for (std::size_t i = 0; i < fresh.size(); i += 4096) fresh[i] = 1;
+      for (std::size_t i = 0; i < fresh.size(); i += 4096) {
+        fresh[i] = 1;
+      }
       std::this_thread::yield();
     }
   });
@@ -1054,7 +1058,7 @@ TEST(Spec, HoldsNamesAGroupByWhatItHolds)
 
 namespace
 {
-capa::GroupContent group(std::vector<std::string> subs, bool is_default = false)
+auto group(std::vector<std::string> subs, bool is_default = false) -> capa::GroupContent
 {
   capa::GroupContent g;
   g.is_default = is_default;

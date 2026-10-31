@@ -19,42 +19,48 @@ void add(Report & rep, const char * id, Verdict v, std::string detail)
   rep.findings.push_back(Finding{id, v, std::move(detail)});
 }
 
-std::string task_dir(int pid, int tid)
+auto task_dir(int pid, int tid) -> std::string
 {
   return "/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid);
 }
 
-int pid_of(const Fs & fs, int tid)
+auto pid_of(const Fs & fs, int tid) -> int
 {
   const auto status = fs.read("/proc/" + std::to_string(tid) + "/status");
   const auto tgid = status ? field(*status, "Tgid") : std::nullopt;
   return tgid ? detail::parse_number<int>(*tgid).value_or(tid) : tid;
 }
 
-std::optional<std::uint64_t> sched_value(const std::string & text, const std::string & key)
+auto sched_value(const std::string & text, const std::string & key) -> std::optional<std::uint64_t>
 {
   std::istringstream lines(text);
   std::string line;
   while (std::getline(lines, line)) {
-    if (line.rfind(key, 0) != 0 || line.find(':') == std::string::npos) continue;
-    if (line.find_first_not_of(' ', key.size()) != line.find(':')) continue;
+    if (line.rfind(key, 0) != 0 || line.find(':') == std::string::npos) {
+      continue;
+    }
+    if (line.find_first_not_of(' ', key.size()) != line.find(':')) {
+      continue;
+    }
     return detail::parse_number<std::uint64_t>(trimmed(line.substr(line.find(':') + 1)));
   }
   return std::nullopt;
 }
 
-std::uint64_t flat_value(const std::string & text, const std::string & key)
+auto flat_value(const std::string & text, const std::string & key) -> std::uint64_t
 {
   std::istringstream lines(text);
   std::string line;
   while (std::getline(lines, line)) {
     const auto w = words(line);
-    if (w.size() == 2 && w[0] == key) return detail::parse_number<std::uint64_t>(w[1]).value_or(0);
+    if (w.size() == 2 && w[0] == key) {
+      return detail::parse_number<std::uint64_t>(w[1]).value_or(0);
+    }
   }
   return 0;
 }
 
-bool bit(const std::optional<std::string> & hex, int signal)
+auto bit(const std::optional<std::string> & hex, int signal) -> bool
 {
   return hex && ((std::stoull(*hex, nullptr, 16) >> (signal - 1)) & 1) != 0;
 }
@@ -66,7 +72,7 @@ struct Row
 };
 
 // /proc/interrupts and /proc/softirqs: a CPUn header, then one row per source.
-std::map<std::string, Row> per_cpu_table(const Fs & fs, const std::string & path)
+auto per_cpu_table(const Fs & fs, const std::string & path) -> std::map<std::string, Row>
 {
   std::map<std::string, Row> out;
   std::istringstream lines(fs.read(path).value_or(""));
@@ -74,21 +80,27 @@ std::map<std::string, Row> per_cpu_table(const Fs & fs, const std::string & path
   std::vector<std::uint32_t> cols;
   if (std::getline(lines, line)) {
     for (const auto & w : words(line)) {
-      if (w.rfind("CPU", 0) == 0)
+      if (w.rfind("CPU", 0) == 0) {
         cols.push_back(detail::parse_number<std::uint32_t>(w.substr(3)).value_or(0));
+      }
     }
   }
   while (std::getline(lines, line)) {
     const auto colon = line.find(':');
-    if (colon == std::string::npos) continue;
+    if (colon == std::string::npos) {
+      continue;
+    }
     const auto w = words(line.substr(colon + 1));
-    if (w.size() < cols.size()) continue;
+    if (w.size() < cols.size()) {
+      continue;
+    }
     Row r;
     for (std::size_t i = 0; i < cols.size(); ++i) {
       r.per_cpu[cols[i]] = detail::parse_number<std::uint64_t>(w[i]).value_or(0);
     }
-    for (std::size_t i = cols.size(); i < w.size(); ++i)
+    for (std::size_t i = cols.size(); i < w.size(); ++i) {
       r.desc += (r.desc.empty() ? "" : " ") + w[i];
+    }
     out[trimmed(line.substr(0, colon))] = std::move(r);
   }
   return out;
@@ -103,7 +115,7 @@ struct Snapshot
   std::map<std::string, std::uint64_t> cgroup;
 };
 
-Snapshot snap(const Fs & fs, int pid, int tid, const std::vector<std::string> & cgroups)
+auto snap(const Fs & fs, int pid, int tid, const std::vector<std::string> & cgroups) -> Snapshot
 {
   Snapshot s;
   s.task = task(fs, pid, tid);
@@ -113,22 +125,25 @@ Snapshot snap(const Fs & fs, int pid, int tid, const std::vector<std::string> & 
   for (const auto & d : cgroups) {
     const std::string cpu = fs.read(d + "/cpu.stat").value_or("");
     const std::string mem = fs.read(d + "/memory.events").value_or("");
-    for (const char * k : {"nr_throttled", "throttled_usec"})
+    for (const char * k : {"nr_throttled", "throttled_usec"}) {
       s.cgroup[d + " " + k] = flat_value(cpu, k);
+    }
     s.cgroup[d + " memory.events high"] = flat_value(mem, "high");
   }
   return s;
 }
 
-std::uint64_t delta(const Row & before, const Row & after, std::uint32_t cpu)
+auto delta(const Row & before, const Row & after, std::uint32_t cpu) -> std::uint64_t
 {
   const auto b = before.per_cpu.find(cpu);
   const auto a = after.per_cpu.find(cpu);
-  if (a == after.per_cpu.end() || b == before.per_cpu.end()) return 0;
+  if (a == after.per_cpu.end() || b == before.per_cpu.end()) {
+    return 0;
+  }
   return a->second - b->second;
 }
 
-std::string interrupt_remedy(const std::string & name, const std::string & desc)
+auto interrupt_remedy(const std::string & name, const std::string & desc) -> std::string
 {
   if (std::isdigit(static_cast<unsigned char>(name[0])) != 0) {
     return "steer it away with /proc/irq/" + name + "/smp_affinity_list";
@@ -151,7 +166,7 @@ std::string interrupt_remedy(const std::string & name, const std::string & desc)
   return "find the sender with trace-cmd -e irq -e ipi";
 }
 
-const std::map<std::string, std::string> & softirq_remedies()
+auto softirq_remedies() -> const std::map<std::string, std::string> &
 {
   static const std::map<std::string, std::string> r = {
     {"HI", "device IRQ affinity"},
@@ -168,7 +183,7 @@ const std::map<std::string, std::string> & softirq_remedies()
   return r;
 }
 
-bool tick(const std::string & name, const std::string & desc)
+auto tick(const std::string & name, const std::string & desc) -> bool
 {
   return name == "LOC" || desc.find("arch_timer") != std::string::npos;
 }
@@ -186,10 +201,14 @@ void judge_interrupts(
   std::vector<std::string> ticks;
   for (const auto & [name, before] : a.interrupts) {
     const auto it = b.interrupts.find(name);
-    if (it == b.interrupts.end()) continue;
+    if (it == b.interrupts.end()) {
+      continue;
+    }
     for (auto c : cpus) {
       const std::uint64_t d = delta(before, it->second, c);
-      if (d == 0) continue;
+      if (d == 0) {
+        continue;
+      }
       const std::string what = "cpu" + std::to_string(c) + " " + name + " " + std::to_string(d);
       if (tick(name, before.desc)) {
         const double rate = static_cast<double>(d) / seconds;
@@ -224,10 +243,14 @@ void judge_softirqs(Report & rep, const Snapshot & a, const Snapshot & b, const 
   std::vector<std::string> fired;
   for (const auto & [name, before] : a.softirqs) {
     const auto it = b.softirqs.find(name);
-    if (it == b.softirqs.end()) continue;
+    if (it == b.softirqs.end()) {
+      continue;
+    }
     for (auto c : cpus) {
       const std::uint64_t d = delta(before, it->second, c);
-      if (d == 0) continue;
+      if (d == 0) {
+        continue;
+      }
       const auto r = softirq_remedies().find(name);
       fired.push_back(
         "cpu" + std::to_string(c) + " " + name + " " + std::to_string(d) +
@@ -288,8 +311,9 @@ void judge_cgroup(Report & rep, const Snapshot & a, const Snapshot & b)
   std::vector<std::string> grew;
   for (const auto & [k, v] : a.cgroup) {
     const auto it = b.cgroup.find(k);
-    if (it != b.cgroup.end() && it->second > v)
+    if (it != b.cgroup.end() && it->second > v) {
       grew.push_back(k + " +" + std::to_string(it->second - v));
+    }
   }
   if (grew.empty()) {
     add(rep, "cgroup-throttle", Verdict::Ok, "no cgroup throttling");
@@ -329,7 +353,9 @@ void judge_signals(Report & rep, const Fs & fs, int pid, int tid, bool rt)
   std::vector<std::string> warn;
   std::vector<std::string> info;
   for (const auto & [sig, name] : {std::pair{2, "SIGINT"}, {15, "SIGTERM"}}) {
-    if (!bit(caught, sig) || bit(blocked, sig)) continue;
+    if (!bit(caught, sig) || bit(blocked, sig)) {
+      continue;
+    }
     if (tid == pid) {
       warn.push_back(std::string(name) + " (this is the first thread, which takes it first)");
     } else if (leader_exited) {

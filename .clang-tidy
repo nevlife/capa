@@ -9,6 +9,8 @@
 HeaderFilterRegex: '.*/capa_[a-z]+/include/.*'
 Checks: >
   -*,
+  modernize-use-trailing-return-type,
+  modernize-use-nodiscard,
   bugprone-*,
   cert-*,
   concurrency-*,
@@ -38,3 +40,4 @@ Checks: >
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
   performance-unnecessary-value-param.AllowedTypes: '^::nanobind::'
+  modernize-use-trailing-return-type.TransformLambdas: none

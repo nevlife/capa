@@ -33,7 +33,9 @@ bool eventually(P done, std::chrono::milliseconds limit = 10000ms)
 {
   const auto end = std::chrono::steady_clock::now() + limit;
   while (!done()) {
-    if (std::chrono::steady_clock::now() > end) return false;
+    if (std::chrono::steady_clock::now() > end) {
+      return false;
+    }
     std::this_thread::sleep_for(1ms);
   }
   return true;
@@ -64,7 +66,9 @@ std::vector<std::string> logged(const std::string & part)
   const std::lock_guard<std::mutex> lk(log_m);
   std::vector<std::string> out;
   for (const auto & l : log_lines) {
-    if (l.find(part) != std::string::npos) out.push_back(l);
+    if (l.find(part) != std::string::npos) {
+      out.push_back(l);
+    }
   }
   return out;
 }
@@ -79,7 +83,9 @@ public:
   std::vector<ComponentResource> get_component_resources(
     const std::string & package, const std::string &) const override
   {
-    if (package != "capa_ros_test") return {};
+    if (package != "capa_ros_test") {
+      return {};
+    }
     return {{"capa_ros_test::Planner", CAPA_TEST_COMPONENTS}};
   }
 
@@ -94,11 +100,15 @@ protected:
     const NodeBase::SharedPtr & node, const rclcpp::CallbackGroup::SharedPtr & group) override
   {
     capa::ComponentManager::on_thread_start(node, group);
-    if (std::string(node->get_name()) != "planner") return;
+    if (std::string(node->get_name()) != "planner") {
+      return;
+    }
     const auto subs = capa::flux::content(*node, group).subscriptions;
     std::string key;
     for (const char * t : {"/capa_ct/odom", "/capa_ct/traj", "/capa_ct/map", "/capa_ct/frames"}) {
-      if (std::find(subs.begin(), subs.end(), t) != subs.end()) key = t;
+      if (std::find(subs.begin(), subs.end(), t) != subs.end()) {
+        key = t;
+      }
     }
     const std::lock_guard<std::mutex> lk(m_);
     started_[key] = capa::current().cpus;
@@ -145,7 +155,9 @@ protected:
     }
     client_.reset();
     load_.reset();
-    if (rclcpp::ok()) rclcpp::shutdown();
+    if (rclcpp::ok()) {
+      rclcpp::shutdown();
+    }
     rcutils_logging_set_output_handler(ros_handler);
     ::unsetenv("CAPA_SPEC");
     std::remove(path_.c_str());
@@ -197,7 +209,9 @@ std::string cpu(std::uint32_t c)
 TEST_F(Container, BindsTheDeclaredGroupsAndWarnsOfStagesThatBindNothing)
 {
   const auto all = capa::current().cpus;
-  if (all.size() < 5) GTEST_SKIP() << "needs five cpus to tell the stages apart";
+  if (all.size() < 5) {
+    GTEST_SKIP() << "needs five cpus to tell the stages apart";
+  }
   start(
     "chains:\n"
     "  c:\n"

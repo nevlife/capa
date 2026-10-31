@@ -27,8 +27,8 @@ public:
     timer_ = create_wall_timer(std::chrono::seconds(1), [this]() { report(); });
   }
 
-  rclcpp::CallbackGroup::SharedPtr group() { return group_; }
-  flux::Subscription & subscription() { return sub_; }
+  auto group() -> rclcpp::CallbackGroup::SharedPtr { return group_; }
+  auto subscription() -> flux::Subscription & { return sub_; }
 
   static constexpr const char * kGroupLabel = "work";
 
@@ -58,7 +58,7 @@ private:
   std::uint64_t seen_ = 0;
 };
 
-int main(int argc, char ** argv)
+auto main(int argc, char ** argv) -> int
 {
   rclcpp::init(argc, argv);
   int rc = 0;

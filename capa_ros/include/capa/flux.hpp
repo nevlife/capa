@@ -71,7 +71,9 @@ void bind(
   const std::string & label = "")
 {
   const Spec spec = Spec::load();
-  if (spec.empty()) return;
+  if (spec.empty()) {
+    return;
+  }
   apply_checked(ex, node, group, spec.stage(node.get_fully_qualified_name(), label));
 }
 
@@ -82,7 +84,9 @@ template <class Executor>
 void bind_declared(Executor & ex, rclcpp::node_interfaces::NodeBaseInterface & node)
 {
   const Spec spec = Spec::load();
-  if (spec.empty()) return;
+  if (spec.empty()) {
+    return;
+  }
   for (const auto & [group, stage] : detail::declared_groups(spec, node)) {
     ex.on_thread_start(group, [st = *stage] { capa::apply_checked(st); });
   }

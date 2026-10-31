@@ -67,6 +67,8 @@ void doc_container(
   // [doc:container]
   capa::flux::bind_declared(ex, *node);  // flux: every group of the node the file declares
   const capa::Stage * st = capa::flux::declared(spec, *node, group);  // any other executor,
-  if (st != nullptr) capa::apply_checked(*st);                        // on the group's thread
+  if (st != nullptr) {
+    capa::apply_checked(*st);  // on the group's thread
+  }
   // [doc:/container]
 }

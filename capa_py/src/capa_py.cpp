@@ -25,16 +25,18 @@ using namespace nb::literals;
 namespace
 {
 
-std::string cpu_text(const std::vector<std::uint32_t> & cpus)
+auto cpu_text(const std::vector<std::uint32_t> & cpus) -> std::string
 {
   std::string out;
-  for (auto c : cpus) out += (out.empty() ? "" : ",") + std::to_string(c);
+  for (auto c : cpus) {
+    out += (out.empty() ? "" : ",") + std::to_string(c);
+  }
   return "[" + out + "]";
 }
 
 }  // namespace
 
-NB_MODULE(_capa, m)
+NB_MODULE(_capa, m)  // NOLINT(modernize-use-trailing-return-type): the macro writes the signature
 {
   m.doc() =
     "capa: OS scheduling for the calling thread and the chain declaration file. Not a real-time "

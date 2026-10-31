@@ -46,17 +46,17 @@ public:
     }
   }
   Host(const Host &) = delete;
-  Host & operator=(const Host &) = delete;
+  auto operator=(const Host &) -> Host & = delete;
   ~Host() { fs::remove_all(root_); }
 
-  capa::Report preflight(
+  [[nodiscard]] auto preflight(
     const capa::Options & opts, int control = 0,
-    capa::Strictness strict = capa::Strictness::Soft) const
+    capa::Strictness strict = capa::Strictness::Soft) const -> capa::Report
   {
     return capa::detail::preflight_at(root_, 0, opts, control, strict);
   }
 
-  capa::Report preflight(const std::string & yaml) const
+  [[nodiscard]] auto preflight(const std::string & yaml) const -> capa::Report
   {
     const std::string file = root_ + "/chain.yaml";
     std::ofstream(file) << yaml;
@@ -67,7 +67,7 @@ private:
   std::string root_;
 };
 
-capa::Options fifo(int priority, std::vector<std::uint32_t> cpus)
+auto fifo(int priority, std::vector<std::uint32_t> cpus) -> capa::Options
 {
   capa::Options o;
   o.policy = capa::Policy::Fifo;

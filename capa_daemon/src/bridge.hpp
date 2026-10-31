@@ -18,21 +18,21 @@ struct ThreadState;
 struct Binding;
 struct HeldStage;
 
-std::unique_ptr<capa::Spec> load(rust::Str path);
-rust::Vec<Stage> stages(const capa::Spec & spec);
-rust::String refusal(const capa::Spec & spec, std::size_t index, int tid);
-rust::String drift(const capa::Spec & spec, std::size_t index, int tid);
+auto load(rust::Str path) -> std::unique_ptr<capa::Spec>;
+auto stages(const capa::Spec & spec) -> rust::Vec<Stage>;
+auto refusal(const capa::Spec & spec, std::size_t index, int tid) -> rust::String;
+auto drift(const capa::Spec & spec, std::size_t index, int tid) -> rust::String;
 void apply(const capa::Spec & spec, std::size_t index, int tid);
-ThreadState observe(int tid);
+auto observe(int tid) -> ThreadState;
 void put_back(int tid, const ThreadState & state);
 void move_to(int tid, rust::Slice<const std::uint32_t> cpus);
-rust::Vec<Binding> bindings();
-rust::Vec<HeldStage> held_stages();
-rust::String daemon_dir();
-rust::String record(rust::Slice<const Binding> held);
-std::uint64_t task_starttime(int pid, int tid);
+auto bindings() -> rust::Vec<Binding>;
+auto held_stages() -> rust::Vec<HeldStage>;
+auto daemon_dir() -> rust::String;
+auto record(rust::Slice<const Binding> held) -> rust::String;
+auto task_starttime(int pid, int tid) -> std::uint64_t;
 void bind(rust::Str target);
-int this_tid();
+auto this_tid() -> int;
 
 }  // namespace capad::bridge
 

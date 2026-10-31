@@ -5,7 +5,7 @@
 
 // Ask before applying anything whether this host can hold the schedule. Verdicts come from
 // kernel-readable sources, so the answer is about this machine.
-int main()
+auto main() -> int
 {
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;

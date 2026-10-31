@@ -45,6 +45,8 @@ repos:
         language: python
         additional_dependencies: [clang-tidy==22.1.8]
         types_or: [c++, c]
+        # One run: a changed header checks every translation unit, so parallel batches multiply.
+        require_serial: true
 
       # Run from capa_daemon/ so rustup picks the toolchain its rust-toolchain.toml pins. Both check
       # the whole crate; clippy also compiles the C++ half of the bridge.

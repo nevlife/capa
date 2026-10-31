@@ -43,7 +43,9 @@ TEST(Schedule, ScheduleReachesTheChildThread)
   auto ros_sub = sub_node->create_subscription<std_msgs::msg::UInt64>(
     "/part/sched", 10,
     [&](const std_msgs::msg::UInt64 &) {
-      if (!seen.exchange(true)) cpus_in_callback = capa::current().cpus;
+      if (!seen.exchange(true)) {
+        cpus_in_callback = capa::current().cpus;
+      }
     },
     opts);
 
@@ -97,7 +99,9 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
   auto ros_sub = sub_node->create_subscription<std_msgs::msg::UInt64>(
     "/part/fifo", 10,
     [&](const std_msgs::msg::UInt64 &) {
-      if (!seen.exchange(true)) policy_in_callback = capa::current().policy;
+      if (!seen.exchange(true)) {
+        policy_in_callback = capa::current().policy;
+      }
     },
     opts);
 
@@ -190,7 +194,9 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
   const auto rep = capa::preflight(opts);
   bool warned = false;
   for (const auto & f : rep.findings) {
-    if (f.verdict == capa::Verdict::Warn) warned = true;
+    if (f.verdict == capa::Verdict::Warn) {
+      warned = true;
+    }
   }
   if (!rep.ok() || !warned) {
     rclcpp::shutdown();
@@ -437,7 +443,9 @@ struct Holder
     subs.push_back(node->create_subscription<std_msgs::msg::UInt64>(
       topic, 10,
       [&seen, &cpus](const std_msgs::msg::UInt64 &) {
-        if (!seen.exchange(true)) cpus = capa::current().cpus;
+        if (!seen.exchange(true)) {
+          cpus = capa::current().cpus;
+        }
       },
       options(g)));
   }
@@ -496,7 +504,9 @@ TEST(Container, ContentListsAFluxSubscriptionInTheGroup)
 TEST(Container, BindDeclaredReachesTheGroupThatHoldsTheSubscription)
 {
   const auto allowed = capa::current().cpus;
-  if (allowed.size() < 2) GTEST_SKIP() << "needs two cpus to tell the groups apart";
+  if (allowed.size() < 2) {
+    GTEST_SKIP() << "needs two cpus to tell the groups apart";
+  }
   SpecFile f(holds_spec(allowed.front(), allowed.back()));
   ::setenv("CAPA_SPEC", f.path().c_str(), 1);
   rclcpp::init(0, nullptr);

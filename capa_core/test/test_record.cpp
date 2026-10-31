@@ -28,13 +28,13 @@
 namespace
 {
 
-std::string run_dir()
+auto run_dir() -> std::string
 {
   const char * d = std::getenv("CAPA_RUN_DIR");
   return d != nullptr ? d : "/dev/shm";
 }
 
-std::string spec_file()
+auto spec_file() -> std::string
 {
   const std::string path = "/tmp/capa_record_" + std::to_string(::getpid()) + ".yaml";
   std::ofstream(path) << "chains:\n  c:\n    target: soft\n    stages:\n"
@@ -44,40 +44,52 @@ std::string spec_file()
 }
 
 // A child that binds `group` of /rec, reports its tid through a pipe, and waits to be killed.
-pid_t holder(const std::string & spec, const std::string & group, int & tid)
+auto holder(const std::string & spec, const std::string & group, int & tid) -> pid_t
 {
   int fds[2];
-  if (::pipe(fds) != 0) std::abort();
+  if (::pipe(fds) != 0) {
+    std::abort();
+  }
   const pid_t pid = ::fork();
   if (pid == 0) {
     ::close(fds[0]);
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
     capa::bind("/rec", group);
     const int me = capa::this_tid();
-    if (::write(fds[1], &me, sizeof me) != sizeof me) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], &me, sizeof me) != sizeof me) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
-  if (::read(fds[0], &tid, sizeof tid) != sizeof tid) tid = 0;
+  if (::read(fds[0], &tid, sizeof tid) != sizeof tid) {
+    tid = 0;
+  }
   ::close(fds[0]);
   return pid;
 }
 
-bool bound(pid_t pid, int tid)
+auto bound(pid_t pid, int tid) -> bool
 {
   for (const capa::Binding & b : capa::bindings()) {
-    if (b.pid == pid && b.tid == tid && b.node == "/rec" && b.group == "work") return true;
+    if (b.pid == pid && b.tid == tid && b.node == "/rec" && b.group == "work") {
+      return true;
+    }
   }
   return false;
 }
 
-bool record_file_exists(pid_t pid)
+auto record_file_exists(pid_t pid) -> bool
 {
   DIR * d = ::opendir(run_dir().c_str());
   bool found = false;
   const std::string prefix = "capa." + std::to_string(pid) + ".";
   while (const dirent * e = ::readdir(d)) {
-    if (std::string(e->d_name).rfind(prefix, 0) == 0) found = true;
+    if (std::string(e->d_name).rfind(prefix, 0) == 0) {
+      found = true;
+    }
   }
   ::closedir(d);
   return found;
@@ -134,9 +146,13 @@ TEST(Record, AForkedChildDoesNotKeepItsParentAlive)
     capa::bind("/rec", "work");
     const pid_t child = ::fork();
     if (child == 0) {
-      for (;;) ::pause();
+      for (;;) {
+        ::pause();
+      }
     }
-    if (::write(fds[1], &child, sizeof child) != sizeof child) ::_exit(1);
+    if (::write(fds[1], &child, sizeof child) != sizeof child) {
+      ::_exit(1);
+    }
     ::_exit(0);
   }
   ::close(fds[1]);
@@ -180,7 +196,9 @@ TEST(Record, AnUnwritableRecordIsReportedNotHidden)
     const capa::Report rep = capa::bind("/rec", "work");
     const capa::Finding * f = rep.find("record");
     const char verdict = f == nullptr ? 'n' : f->verdict == capa::Verdict::Unknown ? 'u' : 'x';
-    if (::write(fds[1], &verdict, 1) != 1) ::_exit(1);
+    if (::write(fds[1], &verdict, 1) != 1) {
+      ::_exit(1);
+    }
     ::_exit(0);
   }
   ::close(fds[1]);
@@ -197,7 +215,7 @@ TEST(Record, AnUnwritableRecordIsReportedNotHidden)
 namespace
 {
 
-std::uint64_t fnv1a(const std::string & s)
+auto fnv1a(const std::string & s) -> std::uint64_t
 {
   std::uint64_t h = 14695981039346656037ULL;
   for (const unsigned char c : s) {
@@ -207,7 +225,7 @@ std::uint64_t fnv1a(const std::string & s)
   return h;
 }
 
-std::string framed(const std::string & body, bool whole = true)
+auto framed(const std::string & body, bool whole = true) -> std::string
 {
   char sum[17];
   const std::uint64_t h = fnv1a(body) + (whole ? 0 : 1);
@@ -215,7 +233,7 @@ std::string framed(const std::string & body, bool whole = true)
   return "capa-record 3 " + std::to_string(body.size()) + " " + sum + "\n" + body;
 }
 
-std::string line(const std::string & node, int pid, int tid)
+auto line(const std::string & node, int pid, int tid) -> std::string
 {
   return node + "\t\t\t" + std::to_string(pid) + "\t" + std::to_string(tid) + "\t" +
          std::to_string(capa::detail::task_starttime(pid, tid)) + "\t-\n";
@@ -224,10 +242,12 @@ std::string line(const std::string & node, int pid, int tid)
 // A child that holds a record it wrote itself, locked, under its own name. `make` builds the text
 // from the child's pid. Returns the child's pid once the record is in place.
 template <typename F>
-pid_t writer(F make)
+auto writer(F make) -> pid_t
 {
   int fds[2];
-  if (::pipe(fds) != 0) std::abort();
+  if (::pipe(fds) != 0) {
+    std::abort();
+  }
   const pid_t pid = ::fork();
   if (pid == 0) {
     ::close(fds[0]);
@@ -245,20 +265,28 @@ pid_t writer(F make)
     const bool ok = fd >= 0 && ::fcntl(fd, F_OFD_SETLK, &fl) == 0 &&
                     ::write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
     const char c = ok ? 'y' : 'n';
-    if (::write(fds[1], &c, 1) != 1) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], &c, 1) != 1) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
   char c = 0;
-  if (::read(fds[0], &c, 1) != 1 || c != 'y') std::abort();
+  if (::read(fds[0], &c, 1) != 1 || c != 'y') {
+    std::abort();
+  }
   ::close(fds[0]);
   return pid;
 }
 
-bool seen(const std::string & node, pid_t pid)
+auto seen(const std::string & node, pid_t pid) -> bool
 {
   for (const capa::Binding & b : capa::bindings()) {
-    if (b.node == node && b.pid == pid) return true;
+    if (b.node == node && b.pid == pid) {
+      return true;
+    }
   }
   return false;
 }
@@ -301,9 +329,13 @@ TEST(Record, AFifoUnderARecordNameDoesNotStallAReader)
   bool done = false;
   for (int i = 0; i < 500 && !done; ++i) {
     done = ::waitpid(pid, nullptr, WNOHANG) == pid;
-    if (!done) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if (!done) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
-  if (!done) reap(pid);
+  if (!done) {
+    reap(pid);
+  }
   std::remove(path.c_str());
   EXPECT_TRUE(done) << "bindings() blocked opening a fifo";
 }
@@ -322,8 +354,12 @@ TEST(Record, TheDaemonsRecordIsBelievedOnlyFromADirectoryNoOneElseCanWrite)
     ::close(fds[0]);
     const std::string why = capa::detail::record_bindings({{"/held", "", "", me, me}});
     const char c = why.empty() ? 'y' : 'n';
-    if (::write(fds[1], &c, 1) != 1) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], &c, 1) != 1) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
   char c = 0;
@@ -357,19 +393,31 @@ TEST(Record, ABindRecordsTheThreadsThatCameBeforeIt)
     std::atomic<int> after{0};
     std::thread b([&] {
       before.store(capa::this_tid());
-      for (;;) ::pause();
+      for (;;) {
+        ::pause();
+      }
     });
-    while (before.load() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (before.load() == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
     capa::bind("/rec", "work");
     std::thread a([&] {
       after.store(capa::this_tid());
-      for (;;) ::pause();
+      for (;;) {
+        ::pause();
+      }
     });
-    while (after.load() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (after.load() == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     const int both[2] = {before.load(), after.load()};
-    if (::write(fds[1], both, sizeof both) != sizeof both) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], both, sizeof both) != sizeof both) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
   int both[2] = {0, 0};
@@ -378,11 +426,15 @@ TEST(Record, ABindRecordsTheThreadsThatCameBeforeIt)
 
   bool found = false;
   for (const auto & h : capa::detail::held_stages()) {
-    if (h.binding.pid != pid) continue;
+    if (h.binding.pid != pid) {
+      continue;
+    }
     found = true;
     auto has = [&](int tid) {
       for (const auto & [t, start] : h.earlier) {
-        if (t == tid) return true;
+        if (t == tid) {
+          return true;
+        }
       }
       return false;
     };
@@ -404,7 +456,9 @@ TEST(Record, AThreadTheDaemonSetCountsAsRecorded)
   ::setenv("CAPA_DAEMON_DIR", dir.c_str(), 1);
   const pid_t target = ::fork();
   if (target == 0) {
-    for (;;) ::pause();
+    for (;;) {
+      ::pause();
+    }
   }
   int fds[2];
   ASSERT_EQ(::pipe(fds), 0);
@@ -413,8 +467,12 @@ TEST(Record, AThreadTheDaemonSetCountsAsRecorded)
     ::close(fds[0]);
     const std::string why = capa::detail::record_bindings({{"", "", "helper", target, target}});
     const char c = why.empty() ? 'y' : 'n';
-    if (::write(fds[1], &c, 1) != 1) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], &c, 1) != 1) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
   char c = 0;

@@ -15,13 +15,17 @@ namespace capa
 ComponentManager::ComponentManager(std::string node_name)
 : ::flux::ComponentManager(std::move(node_name)), spec_(Spec::load())
 {
-  if (spec_.empty()) RCLCPP_INFO(get_logger(), "capa: CAPA_SPEC is not set; no group is bound");
+  if (spec_.empty()) {
+    RCLCPP_INFO(get_logger(), "capa: CAPA_SPEC is not set; no group is bound");
+  }
 }
 
 // Spec::declared() throws when a group or a stage is named twice, which refuses the load.
 void ComponentManager::on_node_added(const NodeBase::SharedPtr & node)
 {
-  if (spec_.empty()) return;
+  if (spec_.empty()) {
+    return;
+  }
   for (const auto & line : unbound_stages(spec_, *node)) {
     RCLCPP_WARN(get_logger(), "%s", line.c_str());
   }
@@ -31,9 +35,13 @@ void ComponentManager::on_node_added(const NodeBase::SharedPtr & node)
 void ComponentManager::on_thread_start(
   const NodeBase::SharedPtr & node, const rclcpp::CallbackGroup::SharedPtr & group)
 {
-  if (spec_.empty()) return;
+  if (spec_.empty()) {
+    return;
+  }
   const Stage * stage = flux::declared(spec_, *node, group);
-  if (stage == nullptr) return;
+  if (stage == nullptr) {
+    return;
+  }
   const std::string name = detail::stage_name(*stage);
   Report rep;
   try {
@@ -43,9 +51,13 @@ void ComponentManager::on_thread_start(
   }
   std::string warned;
   for (const auto & f : rep.findings) {
-    if (f.verdict == Verdict::Warn) warned += (warned.empty() ? " (warn: " : ", ") + f.id;
+    if (f.verdict == Verdict::Warn) {
+      warned += (warned.empty() ? " (warn: " : ", ") + f.id;
+    }
   }
-  if (!warned.empty()) warned += ")";
+  if (!warned.empty()) {
+    warned += ")";
+  }
   RCLCPP_INFO(
     get_logger(), "capa: stage %s bound to thread %d%s", name.c_str(), this_tid(), warned.c_str());
 }
@@ -60,8 +72,12 @@ std::vector<std::string> unbound_stages(
   }
   std::vector<std::string> out;
   for (const Stage & st : spec.stages()) {
-    if (st.node != fqn || st.external || !st.match.empty()) continue;
-    if (std::find(bound.begin(), bound.end(), &st) != bound.end()) continue;
+    if (st.node != fqn || st.external || !st.match.empty()) {
+      continue;
+    }
+    if (std::find(bound.begin(), bound.end(), &st) != bound.end()) {
+      continue;
+    }
     std::string why = "is named by its label alone, and no code in a container says a label";
     if (!st.holds.empty()) {
       why = "holds " + (st.holds.subscription.empty() ? st.holds.service : st.holds.subscription) +

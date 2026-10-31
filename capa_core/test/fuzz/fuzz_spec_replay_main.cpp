@@ -8,12 +8,12 @@
 // Random bytes rarely get past the YAML reader, so the corpus starts from valid files and bends
 // them: truncation, bit flips, numbers swapped for edge values, and stages duplicated.
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t * data, std::size_t size);
+extern "C" auto LLVMFuzzerTestOneInput(const std::uint8_t * data, std::size_t size) -> int;
 
 namespace
 {
 
-std::uint64_t next(std::uint64_t & s)
+auto next(std::uint64_t & s) -> std::uint64_t
 {
   s ^= s << 13;
   s ^= s >> 7;
@@ -46,17 +46,21 @@ const char * const kEdges[] = {"-1", "0", "99", "100", "4294967296", "1e9", "~",
 
 }  // namespace
 
-int main(int argc, char ** argv)
+auto main(int argc, char ** argv) -> int
 {
   if (argc > 1) {
     for (int i = 1; i < argc; ++i) {
       // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): argv is a C array
       std::FILE * f = std::fopen(argv[i], "rb");
-      if (f == nullptr) return 1;
+      if (f == nullptr) {
+        return 1;
+      }
       std::string text;
       char chunk[4096];
       std::size_t got = 0;
-      while ((got = std::fread(chunk, 1, sizeof chunk, f)) > 0) text.append(chunk, got);
+      while ((got = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+        text.append(chunk, got);
+      }
       std::fclose(f);
       run(text);
     }
@@ -67,7 +71,9 @@ int main(int argc, char ** argv)
   for (const char * base : kSeeds) {
     const std::string s = base;
     run(s);
-    for (std::size_t n = 0; n <= s.size(); n += 3) run(s.substr(0, n));
+    for (std::size_t n = 0; n <= s.size(); n += 3) {
+      run(s.substr(0, n));
+    }
     for (int round = 0; round < 2000; ++round) {
       std::string m = s;
       for (int flip = 0; flip < 1 + static_cast<int>(next(seed) % 4); ++flip) {
@@ -81,7 +87,9 @@ int main(int argc, char ** argv)
       std::string m = s;
       for (std::size_t at = m.find_first_of("0123456789"); at != std::string::npos;
            at = m.find_first_of("0123456789", at + 1)) {
-        if (next(seed) % 4 != 0) continue;
+        if (next(seed) % 4 != 0) {
+          continue;
+        }
         std::size_t end = m.find_first_not_of("0123456789", at);
         const std::string edge = kEdges[next(seed) % (sizeof kEdges / sizeof *kEdges)];
         m.replace(at, end - at, edge);

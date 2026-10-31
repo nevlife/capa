@@ -32,12 +32,12 @@ void record_taker(int)
   taker = static_cast<int>(::syscall(SYS_gettid));
 }
 
-int gettid_now()
+auto gettid_now() -> int
 {
   return static_cast<int>(::syscall(SYS_gettid));
 }
 
-int wait_for_taker()
+auto wait_for_taker() -> int
 {
   for (int i = 0; i < 2000 && taker == 0; ++i) {
     std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -56,7 +56,7 @@ public:
     ::sigaction(sig_, &sa, &old_);
   }
   Handler(const Handler &) = delete;
-  Handler & operator=(const Handler &) = delete;
+  auto operator=(const Handler &) -> Handler & = delete;
   ~Handler() { ::sigaction(sig_, &old_, nullptr); }
 
 private:
@@ -79,19 +79,23 @@ public:
   Bystander()
   : thread_([this] {
       tid_ = gettid_now();
-      while (!stop_) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      while (!stop_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
     })
   {
-    while (tid_ == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (tid_ == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
   }
   Bystander(const Bystander &) = delete;
-  Bystander & operator=(const Bystander &) = delete;
+  auto operator=(const Bystander &) -> Bystander & = delete;
   ~Bystander()
   {
     stop_ = true;
     thread_.join();
   }
-  int tid() const { return tid_; }
+  [[nodiscard]] auto tid() const -> int { return tid_; }
 
 private:
   std::atomic<bool> stop_{false};
@@ -101,7 +105,7 @@ private:
 
 // The signal is sent from a third thread that blocks it, so neither the sender nor a running
 // first thread is what decides.
-int kill_from_another_thread(int sig)
+auto kill_from_another_thread(int sig) -> int
 {
   taker = 0;
   std::thread sender([sig] {
@@ -119,7 +123,9 @@ TEST(Kernel, AProcessSignalGoesToTheFirstThreadFirst)
   ASSERT_EQ(gettid_now(), ::getpid()) << "gtest runs the test on the first thread";
   Handler h(SIGUSR1);
   Bystander stage;
-  for (int i = 0; i < 50; ++i) EXPECT_EQ(kill_from_another_thread(SIGUSR1), ::getpid());
+  for (int i = 0; i < 50; ++i) {
+    EXPECT_EQ(kill_from_another_thread(SIGUSR1), ::getpid());
+  }
 
   block(SIGUSR1, SIG_BLOCK);
   for (int i = 0; i < 50; ++i) {
@@ -140,7 +146,9 @@ TEST(Kernel, SigchldGoesToTheThreadThatForkedTheChild)
     std::thread f([&] {
       forker = gettid_now();
       const pid_t child = ::fork();
-      if (child == 0) ::_exit(0);
+      if (child == 0) {
+        ::_exit(0);
+      }
       wait_for_taker();
       ::waitpid(child, nullptr, 0);
     });
@@ -165,7 +173,7 @@ public:
     root_ = ::mkdtemp(tmpl.data());
   }
   Proc(const Proc &) = delete;
-  Proc & operator=(const Proc &) = delete;
+  auto operator=(const Proc &) -> Proc & = delete;
   ~Proc() { fs::remove_all(root_); }
 
   // `caught` and `blocked` are SigCgt and SigBlk masks; bit n-1 is signal n.
@@ -181,7 +189,7 @@ public:
     }
   }
 
-  capa::Finding signals(int tid, int policy = SCHED_FIFO) const
+  [[nodiscard]] auto signals(int tid, int policy = SCHED_FIFO) const -> capa::Finding
   {
     capa::ThreadState st;
     st.policy = policy;

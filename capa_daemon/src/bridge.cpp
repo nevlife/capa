@@ -15,32 +15,34 @@ namespace capad::bridge
 namespace
 {
 
-rust::Vec<std::uint32_t> to_rust(const std::vector<std::uint32_t> & v)
+auto to_rust(const std::vector<std::uint32_t> & v) -> rust::Vec<std::uint32_t>
 {
   rust::Vec<std::uint32_t> out;
   out.reserve(v.size());
-  for (const auto c : v) out.push_back(c);
+  for (const auto c : v) {
+    out.push_back(c);
+  }
   return out;
 }
 
-std::vector<std::uint32_t> to_std(rust::Slice<const std::uint32_t> s)
+auto to_std(rust::Slice<const std::uint32_t> s) -> std::vector<std::uint32_t>
 {
   return {s.begin(), s.end()};
 }
 
-std::string to_std(const rust::String & s)
+auto to_std(const rust::String & s) -> std::string
 {
   return std::string(s);
 }
 
 }  // namespace
 
-std::unique_ptr<capa::Spec> load(rust::Str path)
+auto load(rust::Str path) -> std::unique_ptr<capa::Spec>
 {
   return std::make_unique<capa::Spec>(capa::Spec::load(std::string(path)));
 }
 
-rust::Vec<Stage> stages(const capa::Spec & spec)
+auto stages(const capa::Spec & spec) -> rust::Vec<Stage>
 {
   rust::Vec<Stage> out;
   out.reserve(spec.stages().size());
@@ -62,21 +64,25 @@ rust::Vec<Stage> stages(const capa::Spec & spec)
   return out;
 }
 
-rust::String refusal(const capa::Spec & spec, std::size_t index, int tid)
+auto refusal(const capa::Spec & spec, std::size_t index, int tid) -> rust::String
 {
   const capa::Stage & st = spec.stages().at(index);
   const capa::Report host = capa::detail::preflight_to(tid, st.opts, 0, st.strict);
   const bool warned = std::any_of(host.findings.begin(), host.findings.end(), [](const auto & f) {
     return f.verdict == capa::Verdict::Warn;
   });
-  if (host.ok() && !(st.strict == capa::Strictness::Hard && warned)) return {};
+  if (host.ok() && !(st.strict == capa::Strictness::Hard && warned)) {
+    return {};
+  }
   return host.to_string();
 }
 
-rust::String drift(const capa::Spec & spec, std::size_t index, int tid)
+auto drift(const capa::Spec & spec, std::size_t index, int tid) -> rust::String
 {
   const capa::Report now = capa::verify(spec.stages().at(index), tid);
-  if (now.ok()) return {};
+  if (now.ok()) {
+    return {};
+  }
   return now.to_string();
 }
 
@@ -86,7 +92,7 @@ void apply(const capa::Spec & spec, std::size_t index, int tid)
   capa::detail::apply_checked_to(tid, st.opts, st.strict, 0);
 }
 
-ThreadState observe(int tid)
+auto observe(int tid) -> ThreadState
 {
   const capa::ThreadState st = capa::observe(tid);
   ThreadState out;
@@ -129,7 +135,7 @@ void move_to(int tid, rust::Slice<const std::uint32_t> cpus)
   capa::detail::apply_to(tid, o);
 }
 
-rust::Vec<Binding> bindings()
+auto bindings() -> rust::Vec<Binding>
 {
   rust::Vec<Binding> out;
   for (const capa::Binding & b : capa::bindings()) {
@@ -138,25 +144,27 @@ rust::Vec<Binding> bindings()
   return out;
 }
 
-rust::Vec<HeldStage> held_stages()
+auto held_stages() -> rust::Vec<HeldStage>
 {
   rust::Vec<HeldStage> out;
   for (const auto & h : capa::detail::held_stages()) {
     HeldStage s;
     s.binding =
       Binding{h.binding.node, h.binding.group, h.binding.name, h.binding.pid, h.binding.tid};
-    for (const auto & [tid, start] : h.earlier) s.earlier.push_back(Task{tid, start});
+    for (const auto & [tid, start] : h.earlier) {
+      s.earlier.push_back(Task{tid, start});
+    }
     out.push_back(std::move(s));
   }
   return out;
 }
 
-rust::String daemon_dir()
+auto daemon_dir() -> rust::String
 {
   return capa::detail::daemon_dir();
 }
 
-rust::String record(rust::Slice<const Binding> held)
+auto record(rust::Slice<const Binding> held) -> rust::String
 {
   std::vector<capa::Binding> v;
   v.reserve(held.size());
@@ -166,7 +174,7 @@ rust::String record(rust::Slice<const Binding> held)
   return capa::detail::record_bindings(v);
 }
 
-std::uint64_t task_starttime(int pid, int tid)
+auto task_starttime(int pid, int tid) -> std::uint64_t
 {
   return capa::detail::task_starttime(pid, tid);
 }
@@ -176,7 +184,7 @@ void bind(rust::Str target)
   capa::bind(std::string(target));
 }
 
-int this_tid()
+auto this_tid() -> int
 {
   return capa::this_tid();
 }

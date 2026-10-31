@@ -25,46 +25,52 @@ void add(Report & rep, const char * id, Verdict v, std::string detail)
   rep.findings.push_back(Finding{id, v, std::move(detail)});
 }
 
-bool rt_policy(Policy p)
+auto rt_policy(Policy p) -> bool
 {
   return p == Policy::Fifo || p == Policy::RoundRobin;
 }
 
-std::string cpu_word(std::uint32_t c)
+auto cpu_word(std::uint32_t c) -> std::string
 {
   return "cpu" + std::to_string(c);
 }
 
-std::string sysfs_cpu(std::uint32_t c, const std::string & rest)
+auto sysfs_cpu(std::uint32_t c, const std::string & rest) -> std::string
 {
   return "/sys/devices/system/cpu/cpu" + std::to_string(c) + "/" + rest;
 }
 
-long long number(const std::optional<std::string> & text, long long otherwise)
+auto number(const std::optional<std::string> & text, long long otherwise) -> long long
 {
-  if (!text) return otherwise;
+  if (!text) {
+    return otherwise;
+  }
   const auto v = detail::parse_number<long long>(trimmed(*text));
   return v ? *v : otherwise;
 }
 
 // "always [madvise] never" -> "madvise"
-std::string bracketed(const std::string & text)
+auto bracketed(const std::string & text) -> std::string
 {
   const auto open = text.find('[');
   const auto close = text.find(']', open);
-  if (open == std::string::npos || close == std::string::npos) return trimmed(text);
+  if (open == std::string::npos || close == std::string::npos) {
+    return trimmed(text);
+  }
   return text.substr(open + 1, close - open - 1);
 }
 
-std::string parenthesized(const std::string & text)
+auto parenthesized(const std::string & text) -> std::string
 {
   const auto open = text.find('(');
   const auto close = text.find(')', open);
-  if (open == std::string::npos || close == std::string::npos) return {};
+  if (open == std::string::npos || close == std::string::npos) {
+    return {};
+  }
   return text.substr(open + 1, close - open - 1);
 }
 
-bool preempt_rt(const Fs & fs)
+auto preempt_rt(const Fs & fs) -> bool
 {
   const auto realtime = fs.read("/sys/kernel/realtime");
   const auto version = fs.read("/proc/version");
@@ -72,10 +78,12 @@ bool preempt_rt(const Fs & fs)
          (version && version->find("PREEMPT_RT") != std::string::npos);
 }
 
-std::pair<int, int> kernel_version(const Fs & fs)
+auto kernel_version(const Fs & fs) -> std::pair<int, int>
 {
   const auto w = words(fs.read("/proc/version").value_or(""));
-  if (w.size() < 3) return {0, 0};
+  if (w.size() < 3) {
+    return {0, 0};
+  }
   const auto dot = w[2].find('.');
   const auto end = w[2].find_first_not_of("0123456789", dot + 1);
   return {
@@ -83,24 +91,24 @@ std::pair<int, int> kernel_version(const Fs & fs)
     detail::parse_number<int>(std::string_view(w[2]).substr(dot + 1, end - dot - 1)).value_or(0)};
 }
 
-std::string proc_dir(int tid)
+auto proc_dir(int tid) -> std::string
 {
   return tid == 0 ? "/proc/self" : "/proc/" + std::to_string(tid);
 }
 
-Cpus online(const Fs & fs)
+auto online(const Fs & fs) -> Cpus
 {
   return parse_cpu_list(fs.read("/sys/devices/system/cpu/online").value_or(""));
 }
 
-bool running(const std::vector<Task> & procs, const std::string & comm)
+auto running(const std::vector<Task> & procs, const std::string & comm) -> bool
 {
   return std::any_of(procs.begin(), procs.end(), [&](const Task & t) {
     return !t.kernel && t.comm == comm.substr(0, 15);
   });
 }
 
-std::string layers(const Fs & fs)
+auto layers(const Fs & fs) -> std::string
 {
   std::vector<std::string> out;
   const auto status = fs.read("/proc/self/status").value_or("");
@@ -111,7 +119,9 @@ std::string layers(const Fs & fs)
       " filter(s) (systemd RestrictRealtime=yes refuses RT this way)");
   }
   const auto label = trimmed(fs.read("/proc/self/attr/current").value_or(""));
-  if (!label.empty() && label != "unconfined") out.push_back("LSM label " + label);
+  if (!label.empty() && label != "unconfined") {
+    out.push_back("LSM label " + label);
+  }
   std::istringstream mounts(fs.read("/proc/self/mountinfo").value_or(""));
   std::string line;
   while (std::getline(mounts, line)) {
@@ -135,7 +145,9 @@ void permission(Report & rep, const Fs & fs, const Options & opts)
   std::istringstream lines(limits);
   std::string line;
   while (std::getline(lines, line)) {
-    if (line.rfind("Max realtime priority", 0) != 0) continue;
+    if (line.rfind("Max realtime priority", 0) != 0) {
+      continue;
+    }
     const auto w = words(line);
     soft = w.size() > 3 ? w[3] : soft;
     covers = soft == "unlimited" || number(soft, 0) >= opts.priority;
@@ -182,10 +194,12 @@ void secure_exec(Report & rep, const Fs & fs, int tid)
   add(rep, "secure-exec", Verdict::Ok, "not secure-exec: LD_PRELOAD is honored");
 }
 
-bool elf_binds_now(const std::string & file)
+auto elf_binds_now(const std::string & file) -> bool
 {
   const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
-  if (fd < 0) return true;
+  if (fd < 0) {
+    return true;
+  }
   Elf64_Ehdr eh{};
   bool now = true;
   if (
@@ -194,13 +208,19 @@ bool elf_binds_now(const std::string & file)
     for (int i = 0; i < eh.e_phnum; ++i) {
       Elf64_Phdr ph{};
       const auto at = static_cast<off_t>(eh.e_phoff + i * sizeof ph);
-      if (::pread(fd, &ph, sizeof ph, at) != sizeof ph || ph.p_type != PT_DYNAMIC) continue;
+      if (::pread(fd, &ph, sizeof ph, at) != sizeof ph || ph.p_type != PT_DYNAMIC) {
+        continue;
+      }
       now = false;
       for (std::uint64_t off = 0; off + sizeof(Elf64_Dyn) <= ph.p_filesz;
            off += sizeof(Elf64_Dyn)) {
         Elf64_Dyn d{};
-        if (::pread(fd, &d, sizeof d, static_cast<off_t>(ph.p_offset + off)) != sizeof d) break;
-        if (d.d_tag == DT_NULL) break;
+        if (::pread(fd, &d, sizeof d, static_cast<off_t>(ph.p_offset + off)) != sizeof d) {
+          break;
+        }
+        if (d.d_tag == DT_NULL) {
+          break;
+        }
         std::uint64_t val = 0;
         std::memcpy(&val, &d.d_un, sizeof val);
         now = now || d.d_tag == DT_BIND_NOW || (d.d_tag == DT_FLAGS && (val & DF_BIND_NOW) != 0) ||
@@ -233,11 +253,15 @@ void bind_now(Report & rep, const Fs & fs, int tid)
   std::string line;
   while (std::getline(lines, line)) {
     const auto slash = line.find(" /");
-    if (slash != std::string::npos) objects.insert(line.substr(slash + 1));
+    if (slash != std::string::npos) {
+      objects.insert(line.substr(slash + 1));
+    }
   }
   std::vector<std::string> lazy;
   for (const auto & o : objects) {
-    if (!elf_binds_now(fs.path(o))) lazy.push_back(o.substr(o.rfind('/') + 1));
+    if (!elf_binds_now(fs.path(o))) {
+      lazy.push_back(o.substr(o.rfind('/') + 1));
+    }
   }
   if (lazy.empty()) {
     add(rep, "bind-now", Verdict::Ok, "every mapped object is linked with BIND_NOW");
@@ -340,7 +364,9 @@ void cpu_online(Report & rep, const Fs & fs, const Options & opts)
   }
   Cpus off;
   for (auto c : opts.cpus) {
-    if (!contains(parse_cpu_list(*text), c)) off.push_back(c);
+    if (!contains(parse_cpu_list(*text), c)) {
+      off.push_back(c);
+    }
   }
   if (off.empty()) {
     add(rep, "cpu-online", Verdict::Ok, "requested cpus online");
@@ -362,7 +388,9 @@ void cpu_isolation(Report & rep, const Fs & fs, const Options & opts)
   const Cpus isolated = isolated_cpus(fs);
   Cpus shared;
   for (auto c : opts.cpus) {
-    if (!contains(isolated, c)) shared.push_back(c);
+    if (!contains(isolated, c)) {
+      shared.push_back(c);
+    }
   }
   const std::string sources =
     "isolcpus: " + trimmed(boot.value_or("?")) +
@@ -398,7 +426,9 @@ void cpuset(Report & rep, const Fs & fs, int tid, const Options & opts)
       where = d;
     }
     const auto p = fs.read(d + "/cpuset.cpus.partition");
-    if (p && p->find("invalid") != std::string::npos) invalid.push_back(d + ": " + trimmed(*p));
+    if (p && p->find("invalid") != std::string::npos) {
+      invalid.push_back(d + ": " + trimmed(*p));
+    }
   }
   if (!effective) {
     add(rep, "cpuset", Verdict::Unknown, "no cpuset.cpus.effective above " + dir);
@@ -406,7 +436,9 @@ void cpuset(Report & rep, const Fs & fs, int tid, const Options & opts)
   }
   Cpus outside;
   for (auto c : opts.cpus) {
-    if (!contains(parse_cpu_list(*effective), c)) outside.push_back(c);
+    if (!contains(parse_cpu_list(*effective), c)) {
+      outside.push_back(c);
+    }
   }
   if (!outside.empty()) {
     add(
@@ -455,7 +487,9 @@ void cpufreq(Report & rep, const Fs & fs, const Options & opts)
   std::vector<std::string> slow;
   for (auto c : opts.cpus) {
     const auto driver = fs.read(sysfs_cpu(c, "cpufreq/scaling_driver"));
-    if (!driver) continue;
+    if (!driver) {
+      continue;
+    }
     const auto epp = fs.read(sysfs_cpu(c, "cpufreq/energy_performance_preference"));
     const long long min = number(fs.read(sysfs_cpu(c, "cpufreq/scaling_min_freq")), 0);
     const long long max = number(fs.read(sysfs_cpu(c, "cpufreq/cpuinfo_max_freq")), 0);
@@ -464,7 +498,9 @@ void cpufreq(Report & rep, const Fs & fs, const Options & opts)
       std::to_string(min / 1000) + " of " + std::to_string(max / 1000) + " MHz, policy cpus " +
       trimmed(fs.read(sysfs_cpu(c, "cpufreq/related_cpus")).value_or("?")) + ", transition " +
       trimmed(fs.read(sysfs_cpu(c, "cpufreq/cpuinfo_transition_latency")).value_or("?")) + " ns");
-    if (epp && trimmed(*epp) != "performance") slow.push_back(cpu_word(c));
+    if (epp && trimmed(*epp) != "performance") {
+      slow.push_back(cpu_word(c));
+    }
   }
   if (facts.empty()) {
     add(rep, "cpufreq", Verdict::Unknown, "no cpufreq on the requested cpus");
@@ -499,7 +535,9 @@ void rcu_offload(Report & rep, const Fs & fs, const Options & opts)
   const Cpus nohz = parse_cpu_list(fs.read("/sys/devices/system/cpu/nohz_full").value_or(""));
   Cpus onboard;
   for (auto c : opts.cpus) {
-    if (!contains(offloaded, c) && !contains(nohz, c)) onboard.push_back(c);
+    if (!contains(offloaded, c) && !contains(nohz, c)) {
+      onboard.push_back(c);
+    }
   }
   if (onboard.empty()) {
     add(rep, "rcu-offload", Verdict::Ok, "requested cpus offload RCU callbacks");
@@ -514,10 +552,12 @@ void rcu_offload(Report & rep, const Fs & fs, const Options & opts)
 }
 
 // The handler's name is a subdirectory of /proc/irq/<n>.
-std::string irq_name(const Fs & fs, const std::string & irq)
+auto irq_name(const Fs & fs, const std::string & irq) -> std::string
 {
   for (const auto & e : fs.list("/proc/irq/" + irq)) {
-    if (fs.exists("/proc/irq/" + irq + "/" + e + "/.")) return e;
+    if (fs.exists("/proc/irq/" + irq + "/" + e + "/.")) {
+      return e;
+    }
   }
   return {};
 }
@@ -534,11 +574,17 @@ void irq_affinity(Report & rep, const Fs & fs, const Options & opts)
   std::vector<std::string> managed;
   const bool debugfs = fs.exists("/sys/kernel/debug/irq/irqs");
   for (const auto & irq : irqs) {
-    if (std::isdigit(static_cast<unsigned char>(irq[0])) == 0) continue;
+    if (std::isdigit(static_cast<unsigned char>(irq[0])) == 0) {
+      continue;
+    }
     const std::string dir = "/proc/irq/" + irq;
     auto list = fs.read(dir + "/effective_affinity_list");
-    if (!list || trimmed(*list).empty()) list = fs.read(dir + "/smp_affinity_list");
-    if (!list || !overlap(opts.cpus, parse_cpu_list(*list))) continue;
+    if (!list || trimmed(*list).empty()) {
+      list = fs.read(dir + "/smp_affinity_list");
+    }
+    if (!list || !overlap(opts.cpus, parse_cpu_list(*list))) {
+      continue;
+    }
     const std::string name = irq_name(fs, irq);
     (name.empty() ? bare : named).push_back("irq " + irq + (name.empty() ? "" : " " + name));
     const auto state = fs.read("/sys/kernel/debug/irq/irqs/" + irq);
@@ -584,7 +630,9 @@ void irq_default(Report & rep, const Fs & fs, const Options & opts)
   }
   Cpus hit;
   for (auto c : opts.cpus) {
-    if (contains(parse_cpu_mask(*mask), c)) hit.push_back(c);
+    if (contains(parse_cpu_mask(*mask), c)) {
+      hit.push_back(c);
+    }
   }
   if (hit.empty()) {
     add(
@@ -619,7 +667,9 @@ void cpu_idle(Report & rep, const Fs & fs, const Options & opts)
     const long long qos = qos_text == "n/a" ? 0 : number(qos_text, 0);
     const bool polls_only = qos_text == "n/a";
     for (const auto & s : fs.list(sysfs_cpu(c, "cpuidle"))) {
-      if (s.rfind("state", 0) != 0) continue;
+      if (s.rfind("state", 0) != 0) {
+        continue;
+      }
       any = true;
       const std::string d = sysfs_cpu(c, "cpuidle/" + s + "/");
       const long long latency = number(fs.read(d + "latency"), 0);
@@ -654,7 +704,9 @@ void workqueue(Report & rep, const Fs & fs, const Options & opts, bool hard)
   }
   Cpus hit;
   for (auto c : opts.cpus) {
-    if (contains(parse_cpu_mask(*mask), c)) hit.push_back(c);
+    if (contains(parse_cpu_mask(*mask), c)) {
+      hit.push_back(c);
+    }
   }
   if (hit.empty()) {
     add(rep, "workqueue", Verdict::Ok, "unbound workqueues avoid the requested cpus");
@@ -670,7 +722,9 @@ void kthreads(Report & rep, const std::vector<Task> & procs, const Options & opt
 {
   std::vector<std::string> hit;
   for (const auto & t : procs) {
-    if (t.kernel && t.cpus.size() > 1 && overlap(t.cpus, opts.cpus)) hit.push_back(t.comm);
+    if (t.kernel && t.cpus.size() > 1 && overlap(t.cpus, opts.cpus)) {
+      hit.push_back(t.comm);
+    }
   }
   if (hit.empty()) {
     add(
@@ -691,7 +745,9 @@ void smt(Report & rep, const Fs & fs, const Options & opts, bool hard)
   bool read_any = false;
   for (auto c : opts.cpus) {
     const auto sib = fs.read(sysfs_cpu(c, "topology/thread_siblings_list"));
-    if (!sib) continue;
+    if (!sib) {
+      continue;
+    }
     read_any = true;
     for (auto s : parse_cpu_list(*sib)) {
       if (s != c && !contains(opts.cpus, s) && !contains(isolated, s)) {
@@ -714,7 +770,9 @@ void smt(Report & rep, const Fs & fs, const Options & opts, bool hard)
 void capacity(Report & rep, const Fs & fs, const Options & opts)
 {
   long long top = 0;
-  for (auto c : online(fs)) top = std::max(top, number(fs.read(sysfs_cpu(c, "cpu_capacity")), 0));
+  for (auto c : online(fs)) {
+    top = std::max(top, number(fs.read(sysfs_cpu(c, "cpu_capacity")), 0));
+  }
   if (top == 0) {
     add(rep, "cpu-capacity", Verdict::Unknown, "no cpu_capacity in sysfs");
     return;
@@ -722,7 +780,9 @@ void capacity(Report & rep, const Fs & fs, const Options & opts)
   std::vector<std::string> low;
   for (auto c : opts.cpus) {
     const long long cap = number(fs.read(sysfs_cpu(c, "cpu_capacity")), top);
-    if (cap < top) low.push_back(cpu_word(c) + " " + std::to_string(cap));
+    if (cap < top) {
+      low.push_back(cpu_word(c) + " " + std::to_string(cap));
+    }
   }
   if (low.empty()) {
     add(rep, "cpu-capacity", Verdict::Ok, "requested cpus have the highest capacity");
@@ -745,7 +805,9 @@ void softlockup(Report & rep, const Fs & fs, const Options & opts, bool hard)
   }
   Cpus hit;
   for (auto c : opts.cpus) {
-    if (contains(parse_cpu_list(*mask), c)) hit.push_back(c);
+    if (contains(parse_cpu_list(*mask), c)) {
+      hit.push_back(c);
+    }
   }
   if (trimmed(*watchdog) == "0" || trimmed(soft.value_or("1")) == "0" || hit.empty()) {
     add(rep, "softlockup-watchdog", Verdict::Ok, "the softlockup watchdog leaves the cpus alone");
@@ -843,12 +905,18 @@ void cgroup_limits(
   std::vector<std::string> hard;
   for (const auto & d : cgroup_chain(dir)) {
     const auto max = fs.read(d + "/cpu.max");
-    if (max && max->rfind("max", 0) != 0) cpu.push_back(d + " cpu.max " + trimmed(*max));
+    if (max && max->rfind("max", 0) != 0) {
+      cpu.push_back(d + " cpu.max " + trimmed(*max));
+    }
     const auto h = fs.read(d + "/memory.high");
-    if (h && trimmed(*h) != "max") high.push_back(d + " memory.high " + trimmed(*h));
+    if (h && trimmed(*h) != "max") {
+      high.push_back(d + " memory.high " + trimmed(*h));
+    }
     for (const char * k : {"/memory.max", "/memory.swap.max"}) {
       const auto v = fs.read(d + k);
-      if (v && trimmed(*v) != "max") hard.push_back(d + k + " " + trimmed(*v));
+      if (v && trimmed(*v) != "max") {
+        hard.push_back(d + k + " " + trimmed(*v));
+      }
     }
   }
   const bool fair_threads = !rt_policy(opts.policy) || opts.children == Children::Reset;
@@ -1045,12 +1113,16 @@ void power_policy(Report & rep, const Fs & fs, const std::vector<Task> & procs)
 {
   std::vector<std::string> owners;
   for (const char * d : {"power-profiles-daemon", "tuned", "thermald"}) {
-    if (running(procs, d)) owners.push_back(d);
+    if (running(procs, d)) {
+      owners.push_back(d);
+    }
   }
   if (const auto profile = fs.read("/sys/firmware/acpi/platform_profile")) {
     owners.push_back("ACPI platform_profile " + trimmed(*profile));
   }
-  if (fs.exists("/etc/nvpmodel.conf")) owners.push_back("Jetson nvpmodel");
+  if (fs.exists("/etc/nvpmodel.conf")) {
+    owners.push_back("Jetson nvpmodel");
+  }
   if (owners.empty()) {
     add(rep, "power-policy", Verdict::Ok, "no power policy owner seen");
   } else {
@@ -1083,7 +1155,7 @@ void memory_lock(Report & rep, const Fs & fs, int tid)
   }
 }
 
-bool kernel_thread(const Fs & fs, int tid)
+auto kernel_thread(const Fs & fs, int tid) -> bool
 {
   const auto status = fs.read(proc_dir(tid) + "/status");
   return status && !field(*status, "VmSize");
@@ -1091,7 +1163,7 @@ bool kernel_thread(const Fs & fs, int tid)
 
 }  // namespace
 
-std::string blocking_layers(const Fs & fs)
+auto blocking_layers(const Fs & fs) -> std::string
 {
   return layers(fs);
 }
@@ -1145,17 +1217,17 @@ void preflight_into(
 namespace
 {
 
-bool rt_stage(const Stage & s)
+auto rt_stage(const Stage & s) -> bool
 {
   return s.external ? s.expect_priority > 0 : rt_policy(s.opts.policy);
 }
 
-bool comm_is(const std::string & comm, const std::string & full)
+auto comm_is(const std::string & comm, const std::string & full) -> bool
 {
   return comm == full || (full.size() > 15 && comm == full.substr(0, 15));
 }
 
-bool matched(const Stage & s, const Task & t, const std::map<int, std::string> & process)
+auto matched(const Stage & s, const Task & t, const std::map<int, std::string> & process) -> bool
 {
   if (!s.match.irq.empty()) {
     const auto dash = t.comm.find('-');
@@ -1167,7 +1239,7 @@ bool matched(const Stage & s, const Task & t, const std::map<int, std::string> &
          comm_is(it->second, s.match.process);
 }
 
-int native(Policy p)
+auto native(Policy p) -> int
 {
   return p == Policy::Fifo ? 1 : p == Policy::RoundRobin ? 2 : 0;
 }
@@ -1178,7 +1250,7 @@ struct Holders
   std::set<int> processes;
 };
 
-Holders holders()
+auto holders() -> Holders
 {
   Holders h;
   for (const auto & proc : record::read_live()) {
@@ -1190,13 +1262,20 @@ Holders holders()
   return h;
 }
 
-bool explained(
-  const Spec & spec, const Task & t, const Holders & h, const std::map<int, std::string> & process)
+auto explained(
+  const Spec & spec, const Task & t, const Holders & h,
+  const std::map<int, std::string> & process) -> bool
 {
-  if (h.threads.count({t.pid, t.tid}) != 0) return true;
+  if (h.threads.count({t.pid, t.tid}) != 0) {
+    return true;
+  }
   return std::any_of(spec.stages().begin(), spec.stages().end(), [&](const Stage & s) {
-    if (!s.match.empty()) return matched(s, t, process);
-    if (s.external) return s.expect_priority > 0 && s.expect_priority == t.rt_priority;
+    if (!s.match.empty()) {
+      return matched(s, t, process);
+    }
+    if (s.external) {
+      return s.expect_priority > 0 && s.expect_priority == t.rt_priority;
+    }
     return s.opts.children == Children::Inherit && h.processes.count(t.pid) != 0 &&
            native(s.opts.policy) == t.policy && s.opts.priority == t.rt_priority;
   });
@@ -1207,21 +1286,33 @@ void foreign_rt(Report & rep, const Spec & spec, const std::vector<Task> & all)
   const Holders h = holders();
   std::map<int, std::string> process;
   for (const auto & t : all) {
-    if (t.pid == t.tid) process[t.pid] = t.comm;
+    if (t.pid == t.tid) {
+      process[t.pid] = t.comm;
+    }
   }
   bool any = false;
   for (const auto & s : spec.stages()) {
-    if (s.external || !rt_stage(s) || s.opts.cpus.empty()) continue;
+    if (s.external || !rt_stage(s) || s.opts.cpus.empty()) {
+      continue;
+    }
     std::vector<std::string> above;
     for (const auto & t : all) {
-      if ((t.policy != 1 && t.policy != 2) || t.rt_priority < s.opts.priority) continue;
-      if (!overlap(t.cpus, s.opts.cpus) || t.comm.rfind("migration/", 0) == 0) continue;
-      if (explained(spec, t, h, process)) continue;
+      if ((t.policy != 1 && t.policy != 2) || t.rt_priority < s.opts.priority) {
+        continue;
+      }
+      if (!overlap(t.cpus, s.opts.cpus) || t.comm.rfind("migration/", 0) == 0) {
+        continue;
+      }
+      if (explained(spec, t, h, process)) {
+        continue;
+      }
       above.push_back(
         t.comm + " (tid " + std::to_string(t.tid) + ", " + (t.policy == 1 ? "FIFO " : "RR ") +
         std::to_string(t.rt_priority) + ")");
     }
-    if (above.empty()) continue;
+    if (above.empty()) {
+      continue;
+    }
     any = true;
     add(
       rep, "foreign-rt-thread", Verdict::Warn,
@@ -1237,12 +1328,14 @@ void foreign_rt(Report & rep, const Spec & spec, const std::vector<Task> & all)
   }
 }
 
-Cpus stage_cpus(const Spec & spec)
+auto stage_cpus(const Spec & spec) -> Cpus
 {
   Cpus out;
   for (const auto & s : spec.stages()) {
     for (auto c : s.opts.cpus) {
-      if (!contains(out, c)) out.push_back(c);
+      if (!contains(out, c)) {
+        out.push_back(c);
+      }
     }
   }
   return out;
@@ -1279,12 +1372,18 @@ void housekeeping(Report & rep, const Fs & fs, const Spec & spec)
   }
   Cpus taken = isolated_cpus(fs);
   for (const auto & s : spec.stages()) {
-    if (s.strict != Strictness::Hard || !rt_stage(s) || s.kind != Kind::Worker) continue;
-    for (auto c : s.opts.cpus) taken.push_back(c);
+    if (s.strict != Strictness::Hard || !rt_stage(s) || s.kind != Kind::Worker) {
+      continue;
+    }
+    for (auto c : s.opts.cpus) {
+      taken.push_back(c);
+    }
   }
   Cpus left;
   for (auto c : all) {
-    if (!contains(taken, c)) left.push_back(c);
+    if (!contains(taken, c)) {
+      left.push_back(c);
+    }
   }
   if (left.empty()) {
     add(
@@ -1303,9 +1402,13 @@ void nohz_single(Report & rep, const Fs & fs, const Spec & spec)
   for (auto c : nohz) {
     std::vector<std::string> on;
     for (const auto & s : spec.stages()) {
-      if (contains(s.opts.cpus, c)) on.push_back(detail::stage_name(s));
+      if (contains(s.opts.cpus, c)) {
+        on.push_back(detail::stage_name(s));
+      }
     }
-    if (on.size() > 1) crowded.push_back(cpu_word(c) + ": " + list_some(on, 3));
+    if (on.size() > 1) {
+      crowded.push_back(cpu_word(c) + ": " + list_some(on, 3));
+    }
   }
   if (crowded.empty()) {
     add(rep, "nohz-single-task", Verdict::Ok, "no nohz_full cpu carries two stages");
@@ -1324,8 +1427,12 @@ void llc(Report & rep, const Fs & fs, const Spec & spec)
     std::set<std::string> out;
     for (auto c : s.opts.cpus) {
       auto d = fs.read(sysfs_cpu(c, "cache/index3/shared_cpu_list"));
-      if (!d) d = fs.read(sysfs_cpu(c, "cpufreq/related_cpus"));
-      if (d) out.insert(trimmed(*d));
+      if (!d) {
+        d = fs.read(sysfs_cpu(c, "cpufreq/related_cpus"));
+      }
+      if (d) {
+        out.insert(trimmed(*d));
+      }
     }
     return out;
   };
@@ -1335,10 +1442,14 @@ void llc(Report & rep, const Fs & fs, const Spec & spec)
     for (std::size_t i = 1; i < chain.size(); ++i) {
       const Stage & a = spec.stages()[chain[i - 1]];
       const Stage & b = spec.stages()[chain[i]];
-      if (a.opts.cpus.empty() || b.opts.cpus.empty()) continue;
+      if (a.opts.cpus.empty() || b.opts.cpus.empty()) {
+        continue;
+      }
       const auto da = domains(a);
       const auto db = domains(b);
-      if (da.empty() || db.empty()) continue;
+      if (da.empty() || db.empty()) {
+        continue;
+      }
       known = true;
       if (std::none_of(
             da.begin(), da.end(), [&](const std::string & d) { return db.count(d) != 0; })) {
@@ -1366,14 +1477,16 @@ void smt_neighbor(Report & rep, const Fs & fs, const Spec & spec)
   std::vector<std::string> pairs;
   const auto & st = spec.stages();
   for (const auto & a : st) {
-    if (a.external || !rt_stage(a) || a.kind != Kind::Worker || a.strict != Strictness::Hard)
+    if (a.external || !rt_stage(a) || a.kind != Kind::Worker || a.strict != Strictness::Hard) {
       continue;
+    }
     for (auto c : a.opts.cpus) {
       for (auto sib :
            parse_cpu_list(fs.read(sysfs_cpu(c, "topology/thread_siblings_list")).value_or(""))) {
         for (const auto & b : st) {
-          if (&a == &b || b.external || !rt_stage(b) || b.kind != Kind::Worker || sib == c)
+          if (&a == &b || b.external || !rt_stage(b) || b.kind != Kind::Worker || sib == c) {
             continue;
+          }
           if (contains(b.opts.cpus, sib) && !contains(a.opts.cpus, sib)) {
             pairs.push_back(detail::stage_name(a) + " / " + detail::stage_name(b));
           }
@@ -1402,8 +1515,12 @@ void taint(Report & rep, const Fs & fs)
   }
   const long long bits = number(text, 0);
   std::vector<std::string> bad;
-  if ((bits >> 9) & 1) bad.emplace_back("W (a kernel warning fired)");
-  if ((bits >> 14) & 1) bad.emplace_back("L (a soft lockup was seen)");
+  if ((bits >> 9) & 1) {
+    bad.emplace_back("W (a kernel warning fired)");
+  }
+  if ((bits >> 14) & 1) {
+    bad.emplace_back("L (a soft lockup was seen)");
+  }
   if (bad.empty()) {
     add(rep, "taint", Verdict::Ok, "tainted=" + std::to_string(bits) + ", no W or L");
   } else {
@@ -1416,7 +1533,7 @@ void taint(Report & rep, const Fs & fs)
 
 }  // namespace
 
-Report preflight_spec(const Fs & fs, const Spec & spec)
+auto preflight_spec(const Fs & fs, const Spec & spec) -> Report
 {
   Report rep;
   const std::vector<Task> all = tasks(fs, true);
@@ -1435,12 +1552,12 @@ Report preflight_spec(const Fs & fs, const Spec & spec)
 namespace capa
 {
 
-Report preflight(const Spec & spec)
+auto preflight(const Spec & spec) -> Report
 {
   return host::preflight_spec(host::Fs{}, spec);
 }
 
-Report detail::preflight_at(const std::string & root, const Spec & spec)
+auto detail::preflight_at(const std::string & root, const Spec & spec) -> Report
 {
   return host::preflight_spec(host::Fs(root), spec);
 }

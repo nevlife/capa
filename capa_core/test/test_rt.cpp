@@ -31,7 +31,7 @@ struct RestoreThread
 
   RestoreThread() = default;
   RestoreThread(const RestoreThread &) = delete;
-  RestoreThread & operator=(const RestoreThread &) = delete;
+  auto operator=(const RestoreThread &) -> RestoreThread & = delete;
   ~RestoreThread()
   {
     // SCHED_RESET_ON_FORK, once set, clears only with CAP_SYS_NICE. Keep it rather than fail the
@@ -42,7 +42,9 @@ struct RestoreThread
     ::sched_setscheduler(0, saved.policy | keep, &param);
     cpu_set_t set;
     CPU_ZERO(&set);
-    for (auto c : saved.cpus) CPU_SET(static_cast<int>(c), &set);
+    for (auto c : saved.cpus) {
+      CPU_SET(static_cast<int>(c), &set);
+    }
     ::sched_setaffinity(0, sizeof set, &set);
   }
 };
@@ -241,17 +243,21 @@ TEST(Rt, HardRefusesTheWarnsSoftTolerates)
   capa::Options opts;
   opts.cpus = {0};
   const auto rep = capa::preflight(opts);
-  if (!rep.ok())
+  if (!rep.ok()) {
     GTEST_SKIP()
       << "capa-cap:rt-warn-verdict this host Fails before Warn strictness can be observed";
+  }
 
   bool warned = false;
   for (const auto & f : rep.findings) {
-    if (f.verdict == capa::Verdict::Warn) warned = true;
+    if (f.verdict == capa::Verdict::Warn) {
+      warned = true;
+    }
   }
-  if (!warned)
+  if (!warned) {
     GTEST_SKIP()
       << "capa-cap:rt-warn-verdict this host is fully configured for RT; no Warn to strengthen";
+  }
 
   EXPECT_NO_THROW(capa::apply_checked(opts, capa::Strictness::Soft));
   EXPECT_THROW(capa::apply_checked(opts, capa::Strictness::Hard), std::runtime_error);
@@ -307,13 +313,19 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
   std::atomic<bool> stop{false};
   capa::ThreadState self_view;
   std::thread child([&] {
-    if (perm->verdict == capa::Verdict::Ok) capa::detail::apply(opts);
+    if (perm->verdict == capa::Verdict::Ok) {
+      capa::detail::apply(opts);
+    }
     self_view = capa::current();
     child_tid.store(capa::this_tid());
     settled.store(true);
-    while (!stop.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    while (!stop.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
   });
-  while (!settled.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  while (!settled.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 
   const int tid = child_tid.load();
   EXPECT_NE(tid, capa::this_tid()) << "this_tid returned the same id on two threads";
@@ -445,8 +457,12 @@ TEST(Preflight, MemoryLockIsJudgedOnTheTargetsProcess)
       ::mlock(page, sizeof page) == 0 &&
       capa::detail::preflight_to(0, o, 0).find("memory-lock")->verdict == capa::Verdict::Ok;
     const char c = locked ? 'y' : 'n';
-    if (::write(fds[1], &c, 1) != 1) ::_exit(1);
-    for (;;) ::pause();
+    if (::write(fds[1], &c, 1) != 1) {
+      ::_exit(1);
+    }
+    for (;;) {
+      ::pause();
+    }
   }
   ::close(fds[1]);
   char c = 0;
@@ -455,8 +471,9 @@ TEST(Preflight, MemoryLockIsJudgedOnTheTargetsProcess)
   const capa::Report theirs = capa::detail::preflight_to(pid, o, 0);
   ::kill(pid, SIGKILL);
   ::waitpid(pid, nullptr, 0);
-  if (c != 'y')
+  if (c != 'y') {
     GTEST_SKIP() << "capa-cap:memlock no page could be locked (host limit or sanitizer)";
+  }
 
   const capa::Report mine = capa::preflight(o);
   ASSERT_NE(theirs.find("memory-lock"), nullptr) << theirs.to_string();

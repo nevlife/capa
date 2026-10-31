@@ -324,7 +324,9 @@ hook을 직접 거는 컨테이너는 아래 함수를 쓴다.
 ```cpp doc:container
 capa::flux::bind_declared(ex, *node);  // flux: 파일이 선언한 노드의 그룹 전부
 const capa::Stage * st = capa::flux::declared(spec, *node, group);  // 다른 executor는
-if (st != nullptr) capa::apply_checked(*st);                       // 그룹의 스레드에서
+if (st != nullptr) {
+  capa::apply_checked(*st);  // 그룹의 스레드에서
+}
 ```
 
 - `bind_declared(ex, node)`는 `node`(`NodeBaseInterface`)의 그룹 중 `Spec::declared`가 stage를 찾은 그룹마다 bind를 등록한다. 불러온 노드마다 `spin()` 전에 한 번 부른다. 호출한 뒤에 생긴 그룹에는 bind를 등록하지 않는다. 라벨만 있는 stage는 걸지 않는다. 그런 stage는 `bind`로 건다. `CAPA_SPEC`이 없으면 아무것도 등록하지 않는다.

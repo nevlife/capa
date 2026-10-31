@@ -20,10 +20,10 @@ class Fs
 public:
   explicit Fs(std::string root = {}) : root_(std::move(root)) {}
 
-  std::optional<std::string> read(const std::string & path) const;
-  std::vector<std::string> list(const std::string & dir) const;
-  bool exists(const std::string & path) const;
-  std::string path(const std::string & p) const { return root_ + p; }
+  [[nodiscard]] auto read(const std::string & path) const -> std::optional<std::string>;
+  [[nodiscard]] auto list(const std::string & dir) const -> std::vector<std::string>;
+  [[nodiscard]] auto exists(const std::string & path) const -> bool;
+  [[nodiscard]] auto path(const std::string & p) const -> std::string { return root_ + p; }
 
 private:
   std::string root_;
@@ -31,16 +31,16 @@ private:
 
 using Cpus = std::vector<std::uint32_t>;
 
-std::string trimmed(std::string s);
-Cpus parse_cpu_list(const std::string & text);
-Cpus parse_cpu_mask(const std::string & text);
-bool contains(const Cpus & set, std::uint32_t cpu);
-bool overlap(const Cpus & a, const Cpus & b);
-std::string join(const Cpus & cpus);
-std::optional<std::string> field(const std::string & text, const std::string & key);
-std::optional<std::string> boot_param(const std::string & cmdline, const std::string & key);
-std::vector<std::string> words(const std::string & text);
-std::string list_some(const std::vector<std::string> & items, std::size_t most);
+auto trimmed(std::string s) -> std::string;
+auto parse_cpu_list(const std::string & text) -> Cpus;
+auto parse_cpu_mask(const std::string & text) -> Cpus;
+auto contains(const Cpus & set, std::uint32_t cpu) -> bool;
+auto overlap(const Cpus & a, const Cpus & b) -> bool;
+auto join(const Cpus & cpus) -> std::string;
+auto field(const std::string & text, const std::string & key) -> std::optional<std::string>;
+auto boot_param(const std::string & cmdline, const std::string & key) -> std::optional<std::string>;
+auto words(const std::string & text) -> std::vector<std::string>;
+auto list_some(const std::vector<std::string> & items, std::size_t most) -> std::string;
 
 constexpr int kSchedDeadline = 6;
 
@@ -58,22 +58,22 @@ struct Task
   Cpus cpus;
 };
 
-std::optional<Task> task(const Fs & fs, int pid, int tid);
-std::vector<Task> tasks(const Fs & fs, bool every_thread);
+auto task(const Fs & fs, int pid, int tid) -> std::optional<Task>;
+auto tasks(const Fs & fs, bool every_thread) -> std::vector<Task>;
 
 // The cgroup v2 directory of `pid` under /sys/fs/cgroup, or empty without a v2 line.
-std::string cgroup_dir(const Fs & fs, int pid);
-std::vector<std::string> cgroup_chain(const std::string & dir);
+auto cgroup_dir(const Fs & fs, int pid) -> std::string;
+auto cgroup_chain(const std::string & dir) -> std::vector<std::string>;
 
-Cpus isolated_cpus(const Fs & fs);
+auto isolated_cpus(const Fs & fs) -> Cpus;
 
 // Seccomp, LSM label and hidepid of this process: what can refuse an RT request besides
 // permission. Empty when none applies.
-std::string blocking_layers(const Fs & fs);
+auto blocking_layers(const Fs & fs) -> std::string;
 
 void preflight_into(
   Report & rep, const Fs & fs, int tid, const Options & opts, int control, Strictness strict);
-Report preflight_spec(const Fs & fs, const Spec & spec);
+auto preflight_spec(const Fs & fs, const Spec & spec) -> Report;
 
 void verify_now(Report & rep, const Fs & fs, int tid, const ThreadState & st);
 void verify_window(Report & rep, const Stage & stage, int tid, std::chrono::milliseconds window);

@@ -28,20 +28,24 @@ namespace capa
 namespace detail
 {
 
-const std::vector<std::vector<std::size_t>> & chains(const Spec & spec)
+auto chains(const Spec & spec) -> const std::vector<std::vector<std::size_t>> &
 {
   return spec.chains_;
 }
 
-std::string stage_name(const Stage & stage)
+auto stage_name(const Stage & stage) -> std::string
 {
-  if (!stage.name.empty()) return stage.name;
+  if (!stage.name.empty()) {
+    return stage.name;
+  }
   return stage.node + (stage.group.empty() ? "" : "/" + stage.group);
 }
 
 void reject_external(const Stage & stage, const char * caller)
 {
-  if (!stage.external) return;
+  if (!stage.external) {
+    return;
+  }
   throw std::invalid_argument(
     "capa: stage " + stage_name(stage) +
     " is declared external, so capa does not set it; do not hand it to " + caller);
@@ -64,62 +68,92 @@ void reject_unknown_keys(
 {
   for (const auto & kv : map) {
     const auto key = kv.first.as<std::string>();
-    if (known.count(key) == 0) fail("unknown key '" + key + "' in " + where);
+    if (known.count(key) == 0) {
+      fail("unknown key '" + key + "' in " + where);
+    }
   }
 }
 
-Policy parse_policy(const std::string & s, const std::string & where)
+auto parse_policy(const std::string & s, const std::string & where) -> Policy
 {
-  if (s == "inherit") return Policy::Inherit;
-  if (s == "other") return Policy::Other;
-  if (s == "fifo") return Policy::Fifo;
-  if (s == "rr") return Policy::RoundRobin;
+  if (s == "inherit") {
+    return Policy::Inherit;
+  }
+  if (s == "other") {
+    return Policy::Other;
+  }
+  if (s == "fifo") {
+    return Policy::Fifo;
+  }
+  if (s == "rr") {
+    return Policy::RoundRobin;
+  }
   fail("unknown policy '" + s + "' in " + where + " (inherit / other / fifo / rr)");
 }
 
-Kind parse_kind(const std::string & s, const std::string & where)
+auto parse_kind(const std::string & s, const std::string & where) -> Kind
 {
-  if (s == "worker") return Kind::Worker;
-  if (s == "release") return Kind::Release;
+  if (s == "worker") {
+    return Kind::Worker;
+  }
+  if (s == "release") {
+    return Kind::Release;
+  }
   fail("unknown kind '" + s + "' in " + where + " (worker / release)");
 }
 
-Children parse_children(const std::string & s, const std::string & where)
+auto parse_children(const std::string & s, const std::string & where) -> Children
 {
-  if (s == "reset") return Children::Reset;
-  if (s == "inherit") return Children::Inherit;
+  if (s == "reset") {
+    return Children::Reset;
+  }
+  if (s == "inherit") {
+    return Children::Inherit;
+  }
   fail("unknown children '" + s + "' in " + where + " (reset / inherit)");
 }
 
-Strictness parse_target(const YAML::Node & chain, const std::string & where)
+auto parse_target(const YAML::Node & chain, const std::string & where) -> Strictness
 {
-  if (!chain["target"]) fail("chain " + where + " has no target (hard / soft)");
+  if (!chain["target"]) {
+    fail("chain " + where + " has no target (hard / soft)");
+  }
   const auto t = chain["target"].as<std::string>();
-  if (t == "hard") return Strictness::Hard;
-  if (t == "soft") return Strictness::Soft;
+  if (t == "hard") {
+    return Strictness::Hard;
+  }
+  if (t == "soft") {
+    return Strictness::Soft;
+  }
   fail("unknown target '" + t + "' in chain " + where + " (hard / soft)");
 }
 
 // A SCHED_OTHER thread takes no part in RT priority, so it sits outside every ordering rule.
 // Requiring it to keep climbing would reject a soft consumer at the end of a chain.
-bool is_rt(const Stage & s)
+auto is_rt(const Stage & s) -> bool
 {
-  if (s.external) return s.expect_priority > 0;
+  if (s.external) {
+    return s.expect_priority > 0;
+  }
   return s.opts.policy == Policy::Fifo || s.opts.policy == Policy::RoundRobin;
 }
 
-int priority(const Stage & s)
+auto priority(const Stage & s) -> int
 {
   return s.external ? s.expect_priority : s.opts.priority;
 }
 
 // No cpus means any cpu, and an external stage's cpus are not in the file: both may land on any
 // core, so both are treated as sharing every one.
-bool share_a_cpu(const Stage & a, const Stage & b)
+auto share_a_cpu(const Stage & a, const Stage & b) -> bool
 {
-  if (a.external || b.external || a.opts.cpus.empty() || b.opts.cpus.empty()) return true;
+  if (a.external || b.external || a.opts.cpus.empty() || b.opts.cpus.empty()) {
+    return true;
+  }
   for (auto c : a.opts.cpus) {
-    if (std::find(b.opts.cpus.begin(), b.opts.cpus.end(), c) != b.opts.cpus.end()) return true;
+    if (std::find(b.opts.cpus.begin(), b.opts.cpus.end(), c) != b.opts.cpus.end()) {
+      return true;
+    }
   }
   return false;
 }
@@ -127,10 +161,16 @@ bool share_a_cpu(const Stage & a, const Stage & b)
 void parse_holds(const YAML::Node & h, Stage & st, const std::string & chain)
 {
   const std::string where = detail::stage_name(st) + " in chain " + chain;
-  if (!h.IsMap()) fail("stage " + where + ": holds is not a mapping");
+  if (!h.IsMap()) {
+    fail("stage " + where + ": holds is not a mapping");
+  }
   reject_unknown_keys(h, {"subscription", "service"}, "the holds of stage " + where);
-  if (h["subscription"]) st.holds.subscription = h["subscription"].as<std::string>();
-  if (h["service"]) st.holds.service = h["service"].as<std::string>();
+  if (h["subscription"]) {
+    st.holds.subscription = h["subscription"].as<std::string>();
+  }
+  if (h["service"]) {
+    st.holds.service = h["service"].as<std::string>();
+  }
   const std::string name = st.holds.subscription.empty() ? st.holds.service : st.holds.subscription;
   if (h.size() != 1 || name.empty() || name.front() != '/') {
     fail(
@@ -145,9 +185,11 @@ void parse_holds(const YAML::Node & h, Stage & st, const std::string & chain)
   }
 }
 
-Stage parse_stage(const YAML::Node & n, const std::string & chain)
+auto parse_stage(const YAML::Node & n, const std::string & chain) -> Stage
 {
-  if (!n.IsMap()) fail("a stage in chain " + chain + " is not a mapping");
+  if (!n.IsMap()) {
+    fail("a stage in chain " + chain + " is not a mapping");
+  }
   reject_unknown_keys(
     n,
     {"node", "group", "holds", "name", "kind", "external", "expect_priority", "policy", "priority",
@@ -156,7 +198,9 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
 
   Stage st;
   st.chain = chain;
-  if (n["node"] && n["name"]) fail("a stage in chain " + chain + " has both node and name");
+  if (n["node"] && n["name"]) {
+    fail("a stage in chain " + chain + " has both node and name");
+  }
   if (n["name"]) {
     st.name = n["name"].as<std::string>();
     if (st.name.empty() || st.name.front() == '/') {
@@ -172,14 +216,20 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
     if (st.node.empty() || st.node.front() != '/') {
       fail("stage node '" + st.node + "' in chain " + chain + " must be a fully-qualified name");
     }
-    if (n["group"]) st.group = n["group"].as<std::string>();
-    if (n["holds"]) parse_holds(n["holds"], st, chain);
+    if (n["group"]) {
+      st.group = n["group"].as<std::string>();
+    }
+    if (n["holds"]) {
+      parse_holds(n["holds"], st, chain);
+    }
   } else {
     fail("a stage in chain " + chain + " has neither node nor name");
   }
   const std::string where = detail::stage_name(st);
 
-  if (n["kind"]) st.kind = parse_kind(n["kind"].as<std::string>(), where);
+  if (n["kind"]) {
+    st.kind = parse_kind(n["kind"].as<std::string>(), where);
+  }
 
   st.external = n["external"] && n["external"].as<bool>();
   if (st.external) {
@@ -195,7 +245,9 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
         " must not carry match or holds: both pick a thread to set, and external says nobody "
         "sets it");
     }
-    if (n["expect_priority"]) st.expect_priority = n["expect_priority"].as<int>();
+    if (n["expect_priority"]) {
+      st.expect_priority = n["expect_priority"].as<int>();
+    }
     if (st.expect_priority < 0 || st.expect_priority > 99) {
       fail(
         "external stage " + where + ": expect_priority " + std::to_string(st.expect_priority) +
@@ -210,12 +262,20 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
       " is not external, so expect_priority does not apply; capa sets this thread and reads "
       "back what it got");
   }
-  if (n["policy"]) st.opts.policy = parse_policy(n["policy"].as<std::string>(), where);
-  if (n["priority"]) st.opts.priority = n["priority"].as<int>();
-  if (n["cpus"]) {
-    for (const auto & c : n["cpus"]) st.opts.cpus.push_back(c.as<std::uint32_t>());
+  if (n["policy"]) {
+    st.opts.policy = parse_policy(n["policy"].as<std::string>(), where);
   }
-  if (n["children"]) st.opts.children = parse_children(n["children"].as<std::string>(), where);
+  if (n["priority"]) {
+    st.opts.priority = n["priority"].as<int>();
+  }
+  if (n["cpus"]) {
+    for (const auto & c : n["cpus"]) {
+      st.opts.cpus.push_back(c.as<std::uint32_t>());
+    }
+  }
+  if (n["children"]) {
+    st.opts.children = parse_children(n["children"].as<std::string>(), where);
+  }
   try {
     st.opts.validate();
   } catch (const std::exception & e) {
@@ -223,14 +283,18 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
   }
   if (n["match"]) {
     const YAML::Node & m = n["match"];
-    if (!m.IsMap()) fail("stage " + where + ": match is not a mapping");
+    if (!m.IsMap()) {
+      fail("stage " + where + ": match is not a mapping");
+    }
     reject_unknown_keys(m, {"irq", "process", "arg", "thread"}, "the match of stage " + where);
     for (const auto & [key, field] :
          {std::pair{"irq", &st.match.irq},
           {"process", &st.match.process},
           {"arg", &st.match.arg},
           {"thread", &st.match.thread}}) {
-      if (!m[key]) continue;
+      if (!m[key]) {
+        continue;
+      }
       *field = m[key].as<std::string>();
       // The daemon's state file is one line per thread, tab-separated.
       if (field->find_first_of("\t\n") != std::string::npos) {
@@ -258,7 +322,9 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
     }
   }
   if (n["children_cpus"]) {
-    for (const auto & c : n["children_cpus"]) st.children_cpus.push_back(c.as<std::uint32_t>());
+    for (const auto & c : n["children_cpus"]) {
+      st.children_cpus.push_back(c.as<std::uint32_t>());
+    }
     if (st.opts.cpus.empty() || st.opts.children != Children::Reset) {
       fail(
         "stage " + where +
@@ -266,8 +332,9 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
         "children: reset");
     }
     for (auto c : st.children_cpus) {
-      if (c >= 1024)
+      if (c >= 1024) {
         fail("stage " + where + ": children_cpus " + std::to_string(c) + " is past the cpu set");
+      }
       if (std::find(st.opts.cpus.begin(), st.opts.cpus.end(), c) != st.opts.cpus.end()) {
         fail(
           "stage " + where + ": children_cpus includes cpu " + std::to_string(c) +
@@ -278,7 +345,7 @@ Stage parse_stage(const YAML::Node & n, const std::string & chain)
   return st;
 }
 
-bool same_declaration(const Stage & a, const Stage & b)
+auto same_declaration(const Stage & a, const Stage & b) -> bool
 {
   return a.kind == b.kind && a.external == b.external && a.expect_priority == b.expect_priority &&
          a.opts.policy == b.opts.policy && a.opts.priority == b.opts.priority &&
@@ -295,7 +362,7 @@ struct Chain
   std::vector<std::size_t> members;  // indices into the spec's stages, in flow order
 };
 
-std::string at(const Stage & s)
+auto at(const Stage & s) -> std::string
 {
   return detail::stage_name(s) + " (" + std::to_string(priority(s)) + ")";
 }
@@ -308,10 +375,14 @@ void check_flow(const std::vector<Stage> & stages, const Chain & chain)
 {
   for (std::size_t i = 0; i < chain.members.size(); ++i) {
     const Stage & up = stages[chain.members[i]];
-    if (up.kind != Kind::Worker || !is_rt(up)) continue;
+    if (up.kind != Kind::Worker || !is_rt(up)) {
+      continue;
+    }
     for (std::size_t j = i + 1; j < chain.members.size(); ++j) {
       const Stage & down = stages[chain.members[j]];
-      if (down.kind != Kind::Worker || !is_rt(down) || !share_a_cpu(up, down)) continue;
+      if (down.kind != Kind::Worker || !is_rt(down) || !share_a_cpu(up, down)) {
+        continue;
+      }
       if (priority(down) < priority(up)) {
         fail(
           "chain " + chain.name + ": " + at(up) + " runs above " + at(down) +
@@ -328,10 +399,14 @@ void check_release(const std::vector<Stage> & stages, const Chain & chain)
 {
   for (auto ri : chain.members) {
     const Stage & r = stages[ri];
-    if (r.kind != Kind::Release || !is_rt(r)) continue;
+    if (r.kind != Kind::Release || !is_rt(r)) {
+      continue;
+    }
     for (auto wi : chain.members) {
       const Stage & w = stages[wi];
-      if (w.kind != Kind::Worker || !is_rt(w) || !share_a_cpu(r, w)) continue;
+      if (w.kind != Kind::Worker || !is_rt(w) || !share_a_cpu(r, w)) {
+        continue;
+      }
       if (priority(r) <= priority(w)) {
         fail(
           "chain " + chain.name + ": release stage " + at(r) + " does not run above worker " +
@@ -349,8 +424,12 @@ void check_criticality(const std::vector<Stage> & stages, const std::vector<int>
 {
   for (std::size_t a = 0; a < stages.size(); ++a) {
     for (std::size_t b = 0; b < stages.size(); ++b) {
-      if (a == b || crit[a] <= crit[b]) continue;
-      if (!is_rt(stages[a]) || !is_rt(stages[b]) || !share_a_cpu(stages[a], stages[b])) continue;
+      if (a == b || crit[a] <= crit[b]) {
+        continue;
+      }
+      if (!is_rt(stages[a]) || !is_rt(stages[b]) || !share_a_cpu(stages[a], stages[b])) {
+        continue;
+      }
       if (priority(stages[a]) <= priority(stages[b])) {
         fail(
           at(stages[a]) + " sits on a chain of criticality " + std::to_string(crit[a]) +
@@ -361,15 +440,17 @@ void check_criticality(const std::vector<Stage> & stages, const std::vector<int>
   }
 }
 
-bool rt_worker(const Stage & s)
+auto rt_worker(const Stage & s) -> bool
 {
   return !s.external && s.kind == Kind::Worker && is_rt(s);
 }
 
-bool pinned_together(const Stage & a, const Stage & b)
+auto pinned_together(const Stage & a, const Stage & b) -> bool
 {
   for (auto c : a.opts.cpus) {
-    if (std::find(b.opts.cpus.begin(), b.opts.cpus.end(), c) != b.opts.cpus.end()) return true;
+    if (std::find(b.opts.cpus.begin(), b.opts.cpus.end(), c) != b.opts.cpus.end()) {
+      return true;
+    }
   }
   return false;
 }
@@ -385,8 +466,12 @@ void check_cpu_exclusivity(const std::vector<Stage> & stages)
     for (std::size_t j = i + 1; j < stages.size(); ++j) {
       const Stage & a = stages[i];
       const Stage & b = stages[j];
-      if (!rt_worker(a) || !rt_worker(b) || !pinned_together(a, b)) continue;
-      if (a.strict != Strictness::Hard && b.strict != Strictness::Hard) continue;
+      if (!rt_worker(a) || !rt_worker(b) || !pinned_together(a, b)) {
+        continue;
+      }
+      if (a.strict != Strictness::Hard && b.strict != Strictness::Hard) {
+        continue;
+      }
       fail(
         "stages " + detail::stage_name(a) + " and " + detail::stage_name(b) +
         " are both RT workers pinned to the same cpu. SCHED_FIFO has no timeslice, so one holds "
@@ -398,7 +483,7 @@ void check_cpu_exclusivity(const std::vector<Stage> & stages)
 
 }  // namespace
 
-Spec Spec::load(const std::string & path)
+auto Spec::load(const std::string & path) -> Spec
 {
   YAML::Node root;
   try {
@@ -406,9 +491,13 @@ Spec Spec::load(const std::string & path)
   } catch (const std::exception & e) {
     fail("cannot read '" + path + "': " + e.what());
   }
-  if (!root.IsMap()) fail("'" + path + "' is not a mapping");
+  if (!root.IsMap()) {
+    fail("'" + path + "' is not a mapping");
+  }
   reject_unknown_keys(root, {"chains"}, "the file root");
-  if (!root["chains"] || !root["chains"].IsMap()) fail("'" + path + "' has no chains mapping");
+  if (!root["chains"] || !root["chains"].IsMap()) {
+    fail("'" + path + "' has no chains mapping");
+  }
 
   Spec spec;
   std::vector<Chain> chains;
@@ -417,11 +506,15 @@ Spec Spec::load(const std::string & path)
     for (const auto & kv : root["chains"]) {
       Chain chain{kv.first.as<std::string>(), {}};
       const YAML::Node & body = kv.second;
-      if (!body.IsMap()) fail("chain " + chain.name + " is not a mapping");
+      if (!body.IsMap()) {
+        fail("chain " + chain.name + " is not a mapping");
+      }
       reject_unknown_keys(body, {"target", "stages", "criticality"}, "chain " + chain.name);
       const Strictness strict = parse_target(body, chain.name);
       const int criticality = body["criticality"] ? body["criticality"].as<int>() : 0;
-      if (criticality < 0) fail("chain " + chain.name + ": criticality must be 0 or more");
+      if (criticality < 0) {
+        fail("chain " + chain.name + ": criticality must be 0 or more");
+      }
       if (!body["stages"] || !body["stages"].IsSequence() || body["stages"].size() == 0) {
         fail("chain " + chain.name + " has no stages sequence");
       }
@@ -446,7 +539,9 @@ Spec Spec::load(const std::string & path)
             " and " + st.chain);
         }
         const auto index = static_cast<std::size_t>(dup - spec.stages_.begin());
-        if (strict == Strictness::Hard) dup->strict = Strictness::Hard;
+        if (strict == Strictness::Hard) {
+          dup->strict = Strictness::Hard;
+        }
         crit[index] = std::max(crit[index], criticality);
         chain.members.push_back(index);
       }
@@ -461,7 +556,9 @@ Spec Spec::load(const std::string & path)
   std::map<std::string, const Stage *> spelled;
   for (const Stage & st : spec.stages_) {
     const auto [it, fresh] = spelled.emplace(detail::stage_name(st), &st);
-    if (fresh) continue;
+    if (fresh) {
+      continue;
+    }
     auto which = [](const Stage & x) {
       return "node " + x.node + (x.group.empty() ? " (default group)" : " group " + x.group);
     };
@@ -491,18 +588,23 @@ Spec Spec::load(const std::string & path)
   }
   check_criticality(spec.stages_, crit);
   check_cpu_exclusivity(spec.stages_);
-  for (auto & chain : chains) spec.chains_.push_back(std::move(chain.members));
+  for (auto & chain : chains) {
+    spec.chains_.push_back(std::move(chain.members));
+  }
   return spec;
 }
 
-Spec Spec::load()
+auto Spec::load() -> Spec
 {
   const char * path = std::getenv("CAPA_SPEC");
-  if (path == nullptr || *path == '\0') return Spec{};
+  if (path == nullptr || *path == '\0') {
+    return Spec{};
+  }
   return load(path);
 }
 
-const Stage * Spec::find(const std::string & target, const std::string & group) const noexcept
+auto Spec::find(const std::string & target, const std::string & group) const noexcept
+  -> const Stage *
 {
   const bool node = !target.empty() && target.front() == '/';
   for (const auto & st : stages_) {
@@ -513,7 +615,7 @@ const Stage * Spec::find(const std::string & target, const std::string & group) 
   return nullptr;
 }
 
-const Stage & Spec::stage(const std::string & target, const std::string & group) const
+auto Spec::stage(const std::string & target, const std::string & group) const -> const Stage &
 {
   const Stage * st = find(target, group);
   if (st == nullptr) {
@@ -526,7 +628,7 @@ const Stage & Spec::stage(const std::string & target, const std::string & group)
 
 namespace
 {
-bool holds_it(const GroupContent & g, const Holds & h)
+auto holds_it(const GroupContent & g, const Holds & h) -> bool
 {
   const auto & names = h.subscription.empty() ? g.services : g.subscriptions;
   const auto & name = h.subscription.empty() ? h.service : h.subscription;
@@ -534,24 +636,32 @@ bool holds_it(const GroupContent & g, const Holds & h)
 }
 }  // namespace
 
-std::vector<const Stage *> Spec::declared(
-  const std::string & node, const std::vector<GroupContent> & groups) const
+auto Spec::declared(const std::string & node, const std::vector<GroupContent> & groups) const
+  -> std::vector<const Stage *>
 {
   std::vector<const Stage *> out(groups.size(), nullptr);
   for (const Stage & st : stages_) {
-    if (st.node != node || st.external || !st.match.empty()) continue;
-    if (st.holds.empty() && !st.group.empty()) continue;
+    if (st.node != node || st.external || !st.match.empty()) {
+      continue;
+    }
+    if (st.holds.empty() && !st.group.empty()) {
+      continue;
+    }
     std::vector<std::size_t> hit;
     for (std::size_t g = 0; g < groups.size(); ++g) {
       const bool mine = st.holds.empty() ? groups[g].is_default : holds_it(groups[g], st.holds);
-      if (mine) hit.push_back(g);
+      if (mine) {
+        hit.push_back(g);
+      }
     }
     if (hit.size() > 1) {
       fail(
         "stage " + detail::stage_name(st) + " names " + std::to_string(hit.size()) +
         " callback groups of " + node + "; refusing to guess");
     }
-    if (hit.empty()) continue;
+    if (hit.empty()) {
+      continue;
+    }
     if (out[hit[0]] != nullptr) {
       fail(
         "stages " + detail::stage_name(*out[hit[0]]) + " and " + detail::stage_name(st) +
@@ -562,11 +672,13 @@ std::vector<const Stage *> Spec::declared(
   return out;
 }
 
-std::vector<const Stage *> Spec::external() const
+auto Spec::external() const -> std::vector<const Stage *>
 {
   std::vector<const Stage *> out;
   for (const auto & st : stages_) {
-    if (st.external) out.push_back(&st);
+    if (st.external) {
+      out.push_back(&st);
+    }
   }
   return out;
 }
@@ -589,7 +701,7 @@ struct Claims
   std::mutex m;
   std::map<std::string, Hold> by_stage;
 };
-Claims & claims()
+auto claims() -> Claims &
 {
   static Claims * c = new Claims;
   return *c;
@@ -597,7 +709,7 @@ Claims & claims()
 
 // Called with claims().m held. The record is what other processes read; this process's own
 // checks use the map.
-std::string republish_locked()
+auto republish_locked() -> std::string
 {
   std::vector<record::Entry> entries;
   for (const auto & [stage, h] : claims().by_stage) {
@@ -614,10 +726,12 @@ struct Held
   std::string name;
   Held() = default;
   Held(const Held &) = delete;
-  Held & operator=(const Held &) = delete;
+  auto operator=(const Held &) -> Held & = delete;
   ~Held()
   {
-    if (name.empty()) return;
+    if (name.empty()) {
+      return;
+    }
     std::lock_guard<std::mutex> lock(claims().m);
     claims().by_stage.erase(name);
     republish_locked();
@@ -647,7 +761,7 @@ void on_fork_child()
 
 // One stage names one thread. Two threads under one declaration would leave the file describing
 // neither, so the second is refused while the first is alive.
-Report apply_checked(const Stage & stage)
+auto apply_checked(const Stage & stage) -> Report
 {
   detail::reject_external(stage, "apply_checked()");
   if (!stage.match.empty()) {
@@ -671,7 +785,9 @@ Report apply_checked(const Stage & stage)
   std::optional<std::pair<std::string, Hold>> before;
   {
     std::lock_guard<std::mutex> lock(c.m);
-    if (auto h = c.by_stage.find(held.name); h != c.by_stage.end()) before.emplace(*h);
+    if (auto h = c.by_stage.find(held.name); h != c.by_stage.end()) {
+      before.emplace(*h);
+    }
     auto it = c.by_stage.find(name);
     if (it != c.by_stage.end() && name != held.name) {
       throw std::invalid_argument(
@@ -679,8 +795,12 @@ Report apply_checked(const Stage & stage)
         "; one stage declares one thread");
     }
     // The same thread again: what it started since the first bind is still its children.
-    if (it != c.by_stage.end()) earlier = std::move(it->second.earlier);
-    if (!held.name.empty()) c.by_stage.erase(held.name);
+    if (it != c.by_stage.end()) {
+      earlier = std::move(it->second.earlier);
+    }
+    if (!held.name.empty()) {
+      c.by_stage.erase(held.name);
+    }
     c.by_stage[name] = Hold{self, stage.node, stage.group, stage.name, std::move(earlier)};
     held.name = name;
   }
@@ -715,21 +835,23 @@ Report apply_checked(const Stage & stage)
   return rep;
 }
 
-std::vector<Binding> bindings()
+auto bindings() -> std::vector<Binding>
 {
   std::vector<Binding> out;
   for (const auto & proc : record::read_live()) {
-    for (const auto & e : proc.entries) out.push_back({e.node, e.group, e.name, e.pid, e.tid});
+    for (const auto & e : proc.entries) {
+      out.push_back({e.node, e.group, e.name, e.pid, e.tid});
+    }
   }
   return out;
 }
 
-std::uint64_t detail::task_starttime(int pid, int tid)
+auto detail::task_starttime(int pid, int tid) -> std::uint64_t
 {
   return record::task_starttime(pid, tid);
 }
 
-std::string detail::record_bindings(const std::vector<Binding> & held)
+auto detail::record_bindings(const std::vector<Binding> & held) -> std::string
 {
   std::vector<record::Entry> entries;
   entries.reserve(held.size());
@@ -740,22 +862,24 @@ std::string detail::record_bindings(const std::vector<Binding> & held)
   return record::publish(record::Writer::Daemon, entries);
 }
 
-Report detail::verify_now_at(const std::string & root, int tid, const ThreadState & st)
+auto detail::verify_now_at(const std::string & root, int tid, const ThreadState & st) -> Report
 {
   Report rep;
   host::verify_now(rep, host::Fs(root), tid, st);
   return rep;
 }
 
-std::string detail::daemon_dir()
+auto detail::daemon_dir() -> std::string
 {
   std::string why;
   std::string d = record::daemon_dir(why);
-  if (!why.empty()) throw std::runtime_error("capa: " + why);
+  if (!why.empty()) {
+    throw std::runtime_error("capa: " + why);
+  }
   return d;
 }
 
-std::vector<detail::HeldStage> detail::held_stages()
+auto detail::held_stages() -> std::vector<detail::HeldStage>
 {
   std::vector<HeldStage> out;
   for (const auto & proc : record::read_live()) {
@@ -766,25 +890,29 @@ std::vector<detail::HeldStage> detail::held_stages()
   return out;
 }
 
-Report bind(const std::string & target, const std::string & group)
+auto bind(const std::string & target, const std::string & group) -> Report
 {
   const Spec spec = Spec::load();
-  if (spec.empty()) return Report{};
+  if (spec.empty()) {
+    return Report{};
+  }
   return apply_checked(spec.stage(target, group));
 }
 
-std::optional<Report> bind_declared(const std::string & target, const std::string & group)
+auto bind_declared(const std::string & target, const std::string & group) -> std::optional<Report>
 {
   const Spec spec = Spec::load();
   const Stage * st = spec.find(target, group);
-  if (st == nullptr || st->external || !st->match.empty()) return std::nullopt;
+  if (st == nullptr || st->external || !st->match.empty()) {
+    return std::nullopt;
+  }
   return apply_checked(*st);
 }
 
 namespace
 {
 
-const char * sched_name(int policy)
+auto sched_name(int policy) -> const char *
 {
   switch (policy) {
     case SCHED_OTHER:
@@ -802,11 +930,15 @@ const char * sched_name(int policy)
   }
 }
 
-std::string cpu_list(const std::vector<std::uint32_t> & cpus)
+auto cpu_list(const std::vector<std::uint32_t> & cpus) -> std::string
 {
-  if (cpus.empty()) return "every cpu";
+  if (cpus.empty()) {
+    return "every cpu";
+  }
   std::string out;
-  for (auto c : cpus) out += (out.empty() ? "" : ",") + std::to_string(c);
+  for (auto c : cpus) {
+    out += (out.empty() ? "" : ",") + std::to_string(c);
+  }
   return out;
 }
 
@@ -815,22 +947,24 @@ void add(Report & rep, const char * id, Verdict v, std::string detail)
   rep.findings.push_back(Finding{id, v, std::move(detail)});
 }
 
-int sched_policy(Policy p)
+auto sched_policy(Policy p) -> int
 {
   return p == Policy::Fifo ? SCHED_FIFO : p == Policy::RoundRobin ? SCHED_RR : SCHED_OTHER;
 }
 
-bool within(
-  const std::vector<std::uint32_t> & observed, const std::vector<std::uint32_t> & declared)
+auto within(
+  const std::vector<std::uint32_t> & observed, const std::vector<std::uint32_t> & declared) -> bool
 {
   return std::all_of(observed.begin(), observed.end(), [&](auto c) {
     return std::find(declared.begin(), declared.end(), c) != declared.end();
   });
 }
 
-bool runs_as(const Stage & stage, const ThreadState & st)
+auto runs_as(const Stage & stage, const ThreadState & st) -> bool
 {
-  if (stage.external) return stage.expect_priority > 0 && stage.expect_priority == st.priority;
+  if (stage.external) {
+    return stage.expect_priority > 0 && stage.expect_priority == st.priority;
+  }
   if (sched_policy(stage.opts.policy) != st.policy || stage.opts.priority != st.priority) {
     return false;
   }
@@ -841,18 +975,23 @@ bool runs_as(const Stage & stage, const ThreadState & st)
 // verify()'s finding, not an unexplained thread. A child of a stage whose children inherit is
 // explained while it runs at that stage's scheduling. Any other thread at a stage's values got
 // there without capa.
-bool explains(
-  const Stage & stage, const ThreadState & st, int tid, const std::map<std::string, int> & held_by)
+auto explains(
+  const Stage & stage, const ThreadState & st, int tid,
+  const std::map<std::string, int> & held_by) -> bool
 {
   auto it = held_by.find(detail::stage_name(stage));
-  if (it != held_by.end() && it->second == tid) return true;
-  if (!runs_as(stage, st)) return false;
+  if (it != held_by.end() && it->second == tid) {
+    return true;
+  }
+  if (!runs_as(stage, st)) {
+    return false;
+  }
   return stage.external || stage.opts.children == Children::Inherit;
 }
 
 }  // namespace
 
-Report verify(const Stage & stage, int tid, std::chrono::milliseconds window)
+auto verify(const Stage & stage, int tid, std::chrono::milliseconds window) -> Report
 {
   const std::string where = detail::stage_name(stage);
   Report rep;
@@ -939,7 +1078,9 @@ Report verify(const Stage & stage, int tid, std::chrono::milliseconds window)
         " and its thread may run on " + cpu_list(st.cpus));
   }
   host::verify_now(rep, host::Fs{}, tid, st);
-  if (window.count() > 0) host::verify_window(rep, stage, tid, window);
+  if (window.count() > 0) {
+    host::verify_window(rep, stage, tid, window);
+  }
   return rep;
 }
 
@@ -956,9 +1097,15 @@ void shared_stage_cpus(
     host::parse_cpu_list(host::Fs{}.read("/sys/devices/system/cpu/nohz_full").value_or(""));
   std::vector<std::string> crowded;
   for (const auto & s : spec.stages()) {
-    if (held_by.count(detail::stage_name(s)) == 0 || s.opts.cpus.empty()) continue;
-    if (!s.children_cpus.empty() || s.opts.children != Children::Reset) continue;
-    if (s.strict != Strictness::Hard && !host::overlap(s.opts.cpus, nohz)) continue;
+    if (held_by.count(detail::stage_name(s)) == 0 || s.opts.cpus.empty()) {
+      continue;
+    }
+    if (!s.children_cpus.empty() || s.opts.children != Children::Reset) {
+      continue;
+    }
+    if (s.strict != Strictness::Hard && !host::overlap(s.opts.cpus, nohz)) {
+      continue;
+    }
     for (const auto & [tid, st] : fair) {
       const bool holder = std::any_of(
         held_by.begin(), held_by.end(), [t = tid](const auto & h) { return h.second == t; });
@@ -980,8 +1127,9 @@ void shared_stage_cpus(
   }
 }
 
-Report scan_threads(
-  const Spec & spec, const std::string & task_dir, const std::map<std::string, int> & held_by)
+auto scan_threads(
+  const Spec & spec, const std::string & task_dir,
+  const std::map<std::string, int> & held_by) -> Report
 {
   Report rep;
   DIR * d = ::opendir(task_dir.c_str());
@@ -997,7 +1145,9 @@ Report scan_threads(
   std::vector<std::string> uring;
   while (const dirent * e = ::readdir(d)) {
     const auto parsed = detail::parse_number<int>(e->d_name);
-    if (!parsed) continue;
+    if (!parsed) {
+      continue;
+    }
     const int tid = *parsed;
     ThreadState st;
     try {
@@ -1049,29 +1199,37 @@ Report scan_threads(
 
 }  // namespace
 
-Report verify_process(const Spec & spec)
+auto verify_process(const Spec & spec) -> Report
 {
   std::map<std::string, int> held_by;
   {
     std::lock_guard<std::mutex> lock(claims().m);
-    for (const auto & [stage, h] : claims().by_stage) held_by[stage] = h.tid;
+    for (const auto & [stage, h] : claims().by_stage) {
+      held_by[stage] = h.tid;
+    }
   }
   return scan_threads(spec, "/proc/self/task", held_by);
 }
 
-Report verify_process(const Spec & spec, int pid)
+auto verify_process(const Spec & spec, int pid) -> Report
 {
   if (pid <= 0) {
     throw std::invalid_argument("capa: verify_process needs a pid; 0 would not name a process");
   }
-  if (pid == ::getpid()) return verify_process(spec);
+  if (pid == ::getpid()) {
+    return verify_process(spec);
+  }
 
   std::map<std::string, int> held_by;
   bool recorded = false;
   for (const auto & proc : record::read_live()) {
-    if (proc.pid == pid) recorded = true;
+    if (proc.pid == pid) {
+      recorded = true;
+    }
     for (const auto & e : proc.entries) {
-      if (e.pid != pid) continue;
+      if (e.pid != pid) {
+        continue;
+      }
       recorded = true;  // the daemon's record, for a process that binds nothing itself
       Stage key;
       key.node = e.node;
