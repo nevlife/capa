@@ -21,6 +21,7 @@ struct Entry
   int pid = 0;  // the thread's process: the writer for a bind, another for the daemon's stages
   int tid = 0;
   std::uint64_t tid_start = 0;
+  bool ask = false;  // a bind without the permission, asking the daemon to set its thread
   // Threads the process already had when the stage was bound. None of them is a child of it.
   std::vector<Task> earlier;
 };

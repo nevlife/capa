@@ -154,6 +154,7 @@ auto held_stages() -> rust::Vec<HeldStage>
     for (const auto & [tid, start] : h.earlier) {
       s.earlier.push_back(Task{tid, start});
     }
+    s.ask = h.ask;
     out.push_back(std::move(s));
   }
   return out;

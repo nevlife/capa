@@ -117,6 +117,32 @@ def test_bind_puts_the_calling_thread_on_its_stage(tmp_path, monkeypatch):
     assert got["cpus"] == [target]
 
 
+# Without the permission to set its stage, the thread asks capad and waits for it. With no capad
+# to answer, the stage is refused as before.
+def test_bind_without_permission_asks_capad_and_is_refused_without_an_answer(tmp_path, monkeypatch):
+    path = tmp_path / "ask.yaml"
+    path.write_text(
+        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /ask_node\n"
+        "        policy: fifo\n        priority: 10\n"
+    )
+    monkeypatch.setenv("CAPA_SPEC", str(path))
+    opts = capa.Spec.load(str(path)).stage("/ask_node").opts
+    if capa.preflight(opts).find("policy-permission").verdict == capa.Verdict.Ok:
+        pytest.skip("capa-cap:no-rtprio this thread may set SCHED_FIFO itself, so it never asks")
+    got = {}
+
+    def worker():
+        try:
+            capa.bind("/ask_node")
+        except RuntimeError as e:
+            got["error"] = str(e)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=10.0)
+    assert "capad did not set it within 5 s" in got["error"]
+
+
 def test_bind_without_a_spec_does_nothing(monkeypatch):
     monkeypatch.delenv("CAPA_SPEC", raising=False)
     assert capa.bind("/flux_rt_test", "infer").findings == []

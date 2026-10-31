@@ -48,10 +48,12 @@ mod bridge {
     }
 
     /// `earlier`: the threads its process had when the stage was bound, never its children.
+    /// `ask`: the thread may not set itself and asks capad to set it from the chain file.
     #[derive(Clone, Debug)]
     struct HeldStage {
         binding: Binding,
         earlier: Vec<Task>,
+        ask: bool,
     }
 
     unsafe extern "C++" {

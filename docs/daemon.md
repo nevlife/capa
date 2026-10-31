@@ -20,7 +20,7 @@ capad는 자기가 건 스레드와 옮긴 스레드를 각 스레드의 원래 
 | stage | capad가 하는 일 |
 | --- | --- |
 | `match` | match가 가리키는 스레드를 찾는다. 정확히 하나면 그 스레드에 대해 `preflight`를 돌린다(메모리 잠금은 그 스레드의 프로세스로 판정한다). 판정이 거절이면(`Fail`, 또는 hard 체인의 `Warn`) 걸지 않는다. 거절이 아니면 걸고, `apply_checked`처럼 되읽어서 선언과 다르면 되돌린다. 찾은 스레드가 없거나 둘 이상이거나 판정이 거절이면, 전에 건 스레드를 처음 값으로 되돌리고 아무것도 걸지 않는다. 찾은 스레드가 전과 다르면 이전 스레드를 먼저 되돌리고 새 스레드에 건다 |
-| 스레드가 bind한 stage(`bind`, `spawn`, flux) | 선언과 달라진 점(드리프트)은 보고만 하고 바꾸지 않는다. 그 stage는 bind한 스레드가 맡기 때문이다. `children_cpus`가 있으면 그 stage의 reset 자식을 그리로 옮긴다 |
+| 스레드가 bind한 stage(`bind`, `spawn`, flux) | 선언과 달라진 점(드리프트)은 보고만 하고 바꾸지 않는다. 그 stage는 bind한 스레드가 맡기 때문이다. 권한이 없어 capad에 요청한 스레드는 예외다. capad는 `preflight`를 그 스레드에 돌린 뒤 체인 파일의 값을 걸고, 그 스레드는 되돌릴 대상으로 기억하지 않는다. 같은 stage를 요청한 스레드가 둘 이상이면 아무것도 걸지 않는다. `children_cpus`가 있으면 그 stage의 reset 자식을 그리로 옮긴다 |
 | `external` | 아무것도 하지 않는다 |
 
 - capad는 되돌릴 수 있는 스레드에만 건다. 대상은 SCHED_OTHER, SCHED_FIFO, SCHED_RR로 도는 스레드다. SCHED_BATCH, SCHED_IDLE, SCHED_DEADLINE 스레드는 보고하고 그대로 둔다.

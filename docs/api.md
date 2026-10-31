@@ -36,6 +36,7 @@ chains:
 - `bind(target, group="")`는 호출한 스레드를 그 stage에 건다. 걸기 전에 호스트를 판정하고, 건 뒤에 커널에서 값을 되읽는다. ROS 스레드면 `target`은 노드의 전체 이름(`get_fully_qualified_name()`)이고 `group`은 그룹 라벨이다. `name` stage면 `target`에 그 이름을 주고 그룹은 주지 않는다.
 - `spawn(target, group, fn)`은 스레드를 만들어 bind하고 그 뒤에 `fn`을 돌린다. 스레드가 걸린 뒤에 반환한다. bind가 거절되면 `fn`은 돌지 않고 거절이 호출자에게 던져진다. 새 스레드 안에서 `bind`를 부르는 것보다 이것을 쓴다. 그렇게 하면 스레드는 `bind` 줄에 닿을 때까지 스케줄 없이 돈다.
 - `capa::flux::bind(ex, node, group, label="")`는 executor에 bind를 등록한다. `group`을 맡은 자식 스레드가 첫 콜백 전에 그 stage를 자기에게 건다. 거절되면 `spin()`이 에러를 낸다. stage는 호출할 때 찾으므로, 라벨에 오타가 있으면 그 자리에서 예외를 던진다.
+- 프로세스에 RT 권한이 없어 판정이 `policy-permission` 하나로만 막히면, 셋 다 capad에 맡긴다. 기록에 요청을 남기고, 스레드가 선언대로 돌 때까지 5초까지 기다린다. capad가 걸면 `policy-permission`은 Ok로 바뀐다. 5초 안에 걸리지 않으면 chain의 target과 관계없이 예외를 던진다. 스레드를 파일과 다른 우선순위로 돌게 두지 않기 때문이다. capad는 체인 파일에 선언된 값만 건다.
 - `CAPA_SPEC`이 없으면 셋 다 아무것도 하지 않는다. `bind`는 빈 report를 돌려준다. `spawn`은 `fn`만 돌린다. `flux::bind`는 아무것도 등록하지 않는다.
 - 파일에 없는 라벨을 주면 예외를 던진다. 아무것도 걸지 않고 넘어가면 오타를 알아챌 수 없기 때문이다.
 - `bind_declared(target, group="")`는 파일이 그 stage를 선언했을 때만 `bind`한다. stage가 선언되지 않았을 때, external일 때, `match`가 있을 때는 아무것도 걸지 않고 `std::nullopt`(Python은 `None`)를 돌려준다. 이 함수는 자기가 만드는 스레드마다 이것을 부르는 컨테이너를 위한 것이다. 라벨을 아는 코드는 `bind`를 쓴다. 그래야 라벨의 오타가 예외로 드러난다.

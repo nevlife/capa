@@ -23,7 +23,9 @@ namespace capa::record
 namespace
 {
 
-constexpr const char * kMagic = "capa-record 3";
+// Version 4 added `ask`. Version 3 records, from processes started before, still read.
+constexpr const char * kMagic = "capa-record 4";
+constexpr const char * kMagic3 = "capa-record 3";
 constexpr std::size_t kMaxRecord = std::size_t{1} << 20;
 constexpr int kReadTries = 3;
 
@@ -134,11 +136,21 @@ auto frame(const std::string & body) -> std::string
          body;
 }
 
-auto unframe(const std::string & text) -> std::optional<std::string>
+struct Framed
+{
+  std::string body;
+  bool has_ask = true;
+};
+
+auto unframe(const std::string & text) -> std::optional<Framed>
 {
   const std::size_t magic = std::strlen(kMagic);
   const auto nl = text.find('\n');
-  if (nl == std::string::npos || text.compare(0, magic, kMagic) != 0) {
+  if (nl == std::string::npos) {
+    return std::nullopt;
+  }
+  const bool v4 = text.compare(0, magic, kMagic) == 0;
+  if (!v4 && text.compare(0, std::strlen(kMagic3), kMagic3) != 0) {
     return std::nullopt;
   }
   std::istringstream head(text.substr(magic, nl - magic));
@@ -151,7 +163,7 @@ auto unframe(const std::string & text) -> std::optional<std::string>
   if (body.size() != size || sum != hex(fnv1a(body))) {
     return std::nullopt;
   }
-  return body;
+  return Framed{std::move(body), v4};
 }
 
 // A whole-file write lock held by any open file description is a live writer.
@@ -241,7 +253,7 @@ auto parse_earlier(const std::string & field) -> std::vector<Task>
   return out;
 }
 
-auto parse_entries(const std::string & body) -> std::vector<Entry>
+auto parse_entries(const std::string & body, bool has_ask) -> std::vector<Entry>
 {
   std::vector<Entry> out;
   std::istringstream lines(body);
@@ -252,12 +264,13 @@ auto parse_entries(const std::string & body) -> std::vector<Entry>
     std::string owner;
     std::string tid;
     std::string start;
+    std::string ask = "0";
     std::string earlier;
     if (
       !std::getline(cols, en.node, '\t') || !std::getline(cols, en.group, '\t') ||
       !std::getline(cols, en.name, '\t') || !std::getline(cols, owner, '\t') ||
       !std::getline(cols, tid, '\t') || !std::getline(cols, start, '\t') ||
-      !std::getline(cols, earlier)) {
+      (has_ask && !std::getline(cols, ask, '\t')) || !std::getline(cols, earlier)) {
       continue;
     }
     const auto pid = detail::parse_number<int>(owner);
@@ -269,6 +282,7 @@ auto parse_entries(const std::string & body) -> std::vector<Entry>
     en.pid = *pid;
     en.tid = *t;
     en.tid_start = *s;
+    en.ask = ask == "1";
     en.earlier = parse_earlier(earlier);
     out.push_back(std::move(en));
   }
@@ -310,7 +324,7 @@ void read_dir(Writer w, std::vector<Process> & out)
     const bool trusted =
       write_locked(fd) && starttime_of("/proc/" + std::to_string(pid) + "/stat") == start &&
       (w == Writer::Daemon ? st.st_uid == dst.st_uid : effective_uid(pid) == st.st_uid);
-    std::optional<std::string> body;
+    std::optional<Framed> body;
     for (int i = 0; trusted && !body && i < kReadTries; ++i) {
       const auto text = read_fd(fd);
       if (text) {
@@ -324,7 +338,7 @@ void read_dir(Writer w, std::vector<Process> & out)
 
     Process proc;
     proc.pid = pid;
-    for (auto & en : parse_entries(*body)) {
+    for (auto & en : parse_entries(body->body, body->has_ask)) {
       if (w == Writer::Bind && en.pid != pid) {
         continue;
       }
@@ -485,7 +499,7 @@ auto publish(Writer writer, const std::vector<Entry> & entries) -> std::string
   for (const auto & e : entries) {
     body += e.node + "\t" + e.group + "\t" + e.name + "\t" + std::to_string(e.pid) + "\t" +
             std::to_string(e.tid) + "\t" + std::to_string(e.tid_start) + "\t" +
-            earlier_field(e.earlier) + "\n";
+            (e.ask ? "1" : "0") + "\t" + earlier_field(e.earlier) + "\n";
   }
   const std::string text = frame(body);
   if (

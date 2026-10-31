@@ -733,6 +733,60 @@ TEST(Bind, PutsTheCallingThreadOnItsStage)
   EXPECT_EQ(got, std::vector<std::uint32_t>{allowed.back()});
 }
 
+namespace
+{
+auto fifo_spec(const char * target) -> std::string
+{
+  return std::string("chains:\n  c:\n    target: ") + target +
+         "\n    stages:\n      - node: /ask_node\n        policy: fifo\n        priority: 10\n";
+}
+
+// Whether this process's record shows /ask_node asking capad.
+auto asks_capad() -> bool
+{
+  for (const auto & h : capa::detail::held_stages()) {
+    if (h.binding.node == "/ask_node" && h.binding.pid == ::getpid()) {
+      return h.ask;
+    }
+  }
+  return false;
+}
+
+auto may_set_fifo(const std::string & path) -> bool
+{
+  const auto spec = capa::Spec::load(path);
+  const capa::Report rep = capa::preflight(spec.stage("/ask_node").opts);
+  const capa::Finding * perm = rep.find("policy-permission");
+  return perm != nullptr && perm->verdict == capa::Verdict::Ok;
+}
+}  // namespace
+
+// Without the permission to set its stage, the thread asks capad and waits for it. With no capad
+// to answer, the stage is refused as before, soft or hard, and the request is withdrawn.
+TEST(Bind, WithoutPermissionTheThreadAsksCapadAndIsRefusedWithoutAnAnswer)
+{
+  SpecFile f(fifo_spec("soft"));
+  SpecEnv env(f.path());
+  if (may_set_fifo(f.path())) {
+    GTEST_SKIP() << "capa-cap:no-rtprio this thread may set SCHED_FIFO itself, so it never asks";
+  }
+  std::atomic<bool> refused{false};
+  bool still_asks = true;
+  std::thread t([&] {
+    EXPECT_THROW(capa::bind("/ask_node"), std::runtime_error);
+    still_asks = asks_capad();
+    refused = true;
+  });
+  bool asked = false;
+  while (!refused && !asked) {
+    asked = asks_capad();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  t.join();
+  EXPECT_TRUE(asked) << "the thread was refused without asking capad";
+  EXPECT_FALSE(still_asks);
+}
+
 TEST(Bind, ATypoIsRefusedNotIgnored)
 {
   SpecFile f(pin_spec(0));

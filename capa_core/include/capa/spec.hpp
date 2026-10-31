@@ -186,6 +186,7 @@ struct HeldStage
 {
   Binding binding;
   std::vector<std::pair<int, std::uint64_t>> earlier;
+  bool ask = false;  // the thread may not set itself and asks the daemon to
 };
 auto held_stages() -> std::vector<HeldStage>;
 

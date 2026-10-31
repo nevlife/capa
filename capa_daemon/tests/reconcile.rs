@@ -327,6 +327,19 @@ fn holder() {
             thread::park();
         }
     };
+    if role == "ask" {
+        let (bound_tx, bound_rx) = mpsc::channel();
+        thread::spawn(move || {
+            println!("asking {}", ffi::this_tid());
+            let _ = ffi::bind("/holder");
+            bound_tx.send(()).unwrap();
+        });
+        bound_rx.recv().unwrap();
+        println!("bound");
+        loop {
+            thread::park();
+        }
+    }
     let other = if role == "earlier" {
         let cpu: u32 = env::var(HOLDER_CPU).unwrap().parse().unwrap();
         thread::spawn(move || {
@@ -382,6 +395,51 @@ impl Drop for Holder {
         let _ = self.proc.kill();
         let _ = self.proc.wait();
     }
+}
+
+// A thread that may not set its stage itself asks capad, which sets the chain file's values on it
+// when it can, and says why not when it cannot.
+#[test]
+fn a_thread_without_permission_asks_and_capad_answers() {
+    let _serial = serial();
+    let f = SpecFile::new(
+        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /holder\n        \
+         policy: fifo\n        priority: 10\n",
+    );
+    if ffi::refusal(&ffi::load(&f.path).unwrap(), 0, ffi::this_tid()).is_empty() {
+        eprintln!("skipped: capa-cap:no-rtprio a thread here may set FIFO itself, so none asks");
+        return;
+    }
+    let mut proc = Command::new(env::current_exe().unwrap())
+        .args(["holder", "--exact", "--nocapture"])
+        .env(HOLDER, "ask")
+        .env("CAPA_SPEC", &f.path)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(proc.stdout.take().unwrap()).lines();
+    let asking = lines
+        .by_ref()
+        .map_while(Result::ok)
+        .find_map(|l| l.strip_prefix("asking ").map(|t| t.parse::<i32>().unwrap()))
+        .expect("the holder did not start binding");
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let mut seen = Vec::new();
+    for _ in 0..50 {
+        seen.extend(rec.pass());
+        if contains(&seen, "asked to set it") || contains(&seen, "set on its request") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    let _ = proc.kill();
+    let _ = proc.wait();
+    assert!(contains(&seen, &format!("tid {asking}")), "{seen:?}");
+    // This process has no permission either, so capad's own preflight refuses.
+    assert!(
+        contains(&seen, "asked to set it, refused by preflight"),
+        "{seen:?}"
+    );
 }
 
 fn holder_spec(cpu: u32, children: u32) -> SpecFile {

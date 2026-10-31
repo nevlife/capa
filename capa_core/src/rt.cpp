@@ -313,6 +313,36 @@ auto has_warn(const Report & rep) -> bool
 }
 }  // namespace
 
+auto detail::mismatch(const Options & opts, const ThreadState & got) -> std::string
+{
+  if (opts.policy != Policy::Inherit) {
+    if (got.policy != native_policy(opts.policy) || got.priority != opts.priority) {
+      return std::string("capa: apply_checked read back policy ") + std::to_string(got.policy) +
+             "/priority " + std::to_string(got.priority) + " after asking for " +
+             policy_name(opts.policy) + "/" + std::to_string(opts.priority) +
+             "; the thread is not running as declared";
+    }
+    const bool want_reset = is_rt_policy(opts.policy) && opts.children == Children::Reset;
+    if (got.reset_on_fork != want_reset) {
+      return std::string("capa: apply_checked read back SCHED_RESET_ON_FORK ") +
+             (got.reset_on_fork ? "set" : "clear") + " after asking for children=" +
+             (opts.children == Children::Reset ? "reset" : "inherit");
+    }
+  }
+  if (!opts.cpus.empty()) {
+    for (auto c : got.cpus) {
+      if (std::find(opts.cpus.begin(), opts.cpus.end(), c) == opts.cpus.end()) {
+        return "capa: apply_checked read back cpu " + std::to_string(c) +
+               ", which was not among the requested cpus; the affinity did not take";
+      }
+    }
+    if (got.cpus.empty()) {
+      return "capa: apply_checked read back an empty cpu affinity";
+    }
+  }
+  return {};
+}
+
 auto detail::apply_checked_to(
   int tid, const Options & opts, Strictness strict, int control_priority) -> Report
 {
@@ -341,34 +371,9 @@ auto detail::apply_checked_to(
   // to the cpus it allows, and a thread on fewer of its requested cpus has left none of them;
   // a cpu outside the request is the failure. verify() reads the same claim afterwards.
 #if defined(__linux__)
-  const ThreadState got = tid == 0 ? current() : observe(tid);
-  if (opts.policy != Policy::Inherit) {
-    if (got.policy != native_policy(opts.policy) || got.priority != opts.priority) {
-      throw std::runtime_error(
-        std::string("capa: apply_checked read back policy ") + std::to_string(got.policy) +
-        "/priority " + std::to_string(got.priority) + " after asking for " +
-        policy_name(opts.policy) + "/" + std::to_string(opts.priority) +
-        "; the thread is not running as declared");
-    }
-    const bool want_reset = is_rt_policy(opts.policy) && opts.children == Children::Reset;
-    if (got.reset_on_fork != want_reset) {
-      throw std::runtime_error(
-        std::string("capa: apply_checked read back SCHED_RESET_ON_FORK ") +
-        (got.reset_on_fork ? "set" : "clear") +
-        " after asking for children=" + (opts.children == Children::Reset ? "reset" : "inherit"));
-    }
-  }
-  if (!opts.cpus.empty()) {
-    for (auto c : got.cpus) {
-      if (std::find(opts.cpus.begin(), opts.cpus.end(), c) == opts.cpus.end()) {
-        throw std::runtime_error(
-          "capa: apply_checked read back cpu " + std::to_string(c) +
-          ", which was not among the requested cpus; the affinity did not take");
-      }
-    }
-    if (got.cpus.empty()) {
-      throw std::runtime_error("capa: apply_checked read back an empty cpu affinity");
-    }
+  const std::string off = detail::mismatch(opts, tid == 0 ? current() : observe(tid));
+  if (!off.empty()) {
+    throw std::runtime_error(off);
   }
 #endif
   return rep;

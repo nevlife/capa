@@ -99,6 +99,8 @@ auto preflight_to(
   Strictness strict = Strictness::Soft) -> Report;
 auto apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority)
   -> Report;
+// Why `got` is not what `opts` asks for, or "" when it is.
+auto mismatch(const Options & opts, const ThreadState & got) -> std::string;
 // preflight_to with every /proc and /sys path read under `root`, for tests on host snapshots.
 auto preflight_at(
   const std::string & root, int tid, const Options & opts, int control_priority,

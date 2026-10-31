@@ -423,6 +423,30 @@ impl Reconciler {
         self.note(out, key, state);
     }
 
+    /// A bound thread without the permission to set itself asks; capad sets what the chain file
+    /// declares for the stage, never anything the asking process supplies. It does not put the
+    /// thread back on exit: the thread holds the stage, as if it had set itself.
+    fn set_on_request(&self, index: usize, b: &Binding, askers: usize) -> String {
+        if askers > 1 {
+            return format!(
+                "asked by {askers} threads; one stage declares one thread, so none is set"
+            );
+        }
+        let refusal = ffi::refusal(&self.spec, index, b.tid);
+        if !refusal.is_empty() {
+            return format!("asked to set it, refused by preflight, not set:\n{refusal}");
+        }
+        let start = ffi::task_starttime(b.pid, b.tid);
+        match ffi::apply(&self.spec, index, b.tid) {
+            Ok(()) if ffi::task_starttime(b.pid, b.tid) != start => format!(
+                "tid {} ended while being set; whatever reuses it may now carry the stage",
+                b.tid
+            ),
+            Ok(()) => "set on its request (it may not set itself)".to_owned(),
+            Err(e) => format!("asked to set it, cannot: {e}"),
+        }
+    }
+
     fn watch_bound(&mut self, index: usize, st: &Stage, held: &[HeldStage], out: &mut Vec<String>) {
         let mut declared = st.cpus.clone();
         declared.sort_unstable();
@@ -436,6 +460,17 @@ impl Reconciler {
             let drift = ffi::drift(&self.spec, index, b.tid);
             let state = if drift.is_empty() {
                 "runs as declared".to_owned()
+            } else if h.ask {
+                let askers = held
+                    .iter()
+                    .filter(|x| {
+                        x.ask
+                            && x.binding.node == st.node
+                            && x.binding.group == st.group
+                            && x.binding.name == st.name
+                    })
+                    .count();
+                self.set_on_request(index, b, askers)
             } else {
                 format!("drifted (the thread owns it; reported, not changed):\n{drift}")
             };

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -20,6 +21,7 @@
 #include <set>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 namespace capa
@@ -695,6 +697,7 @@ struct Hold
   std::string group;
   std::string name;
   std::vector<record::Task> earlier;  // the process's threads before the bind: not its children
+  bool ask = false;                   // waiting for, or set by, the daemon
 };
 struct Claims
 {
@@ -714,7 +717,7 @@ auto republish_locked() -> std::string
   std::vector<record::Entry> entries;
   for (const auto & [stage, h] : claims().by_stage) {
     entries.push_back(
-      {h.node, h.group, h.name, ::getpid(), h.tid, record::task_starttime(::getpid(), h.tid),
+      {h.node, h.group, h.name, ::getpid(), h.tid, record::task_starttime(::getpid(), h.tid), h.ask,
        h.earlier});
   }
   return record::publish(record::Writer::Bind, entries);
@@ -757,6 +760,82 @@ void on_fork_child()
   claims().m.unlock();
 }
 
+}  // namespace
+
+namespace
+{
+// capad reads the records once a second (its default --interval), so this leaves it a few passes.
+constexpr auto kDelegateWait = std::chrono::seconds(5);
+constexpr auto kDelegatePoll = std::chrono::milliseconds(20);
+
+auto blocks(const Finding & f, Strictness strict) -> bool
+{
+  return f.verdict == Verdict::Fail || (strict == Strictness::Hard && f.verdict == Verdict::Warn);
+}
+
+// The preflight, when the one thing in the way is this process's own permission, which capad has.
+auto refused_for_permission_only(const Stage & stage) -> std::optional<Report>
+{
+  const Options & o = stage.opts;
+  if (o.policy == Policy::Inherit && o.cpus.empty()) {
+    return std::nullopt;
+  }
+  Report pre = detail::preflight_to(0, o, 0, stage.strict);
+  bool refused = false;
+  for (const auto & f : pre.findings) {
+    if (!blocks(f, stage.strict)) {
+      continue;
+    }
+    if (f.id != "policy-permission") {
+      return std::nullopt;
+    }
+    refused = true;
+  }
+  if (!refused) {
+    return std::nullopt;
+  }
+  return pre;
+}
+
+// Marks the stage's record as asking capad, then waits for the thread to run as declared. capad
+// sets only what the chain file declares, so the request carries no values. Called with the claim
+// of `name` taken by this thread.
+auto delegate(const Stage & stage, const std::string & name, Report pre) -> Report
+{
+  {
+    std::lock_guard<std::mutex> lock(claims().m);
+    claims().by_stage[name].ask = true;
+    const std::string why = republish_locked();
+    if (!why.empty()) {
+      throw std::runtime_error(
+        "capa: stage " + name +
+        " needs a permission this process does not have, and the request to capad could not be "
+        "recorded (" +
+        why + ")\n" + pre.to_string());
+    }
+  }
+  const auto end = std::chrono::steady_clock::now() + kDelegateWait;
+  std::string off = detail::mismatch(stage.opts, current());
+  while (!off.empty() && std::chrono::steady_clock::now() < end) {
+    std::this_thread::sleep_for(kDelegatePoll);
+    off = detail::mismatch(stage.opts, current());
+  }
+  // Not left running at another priority than the file says, whatever the chain's target: the
+  // refusal is the one this process got before capad could be asked.
+  if (!off.empty()) {
+    throw std::runtime_error(
+      "capa: stage " + name +
+      " needs a permission this process does not have, and capad did not set it within 5 s. Run "
+      "capad with this chain file, or give the process RLIMIT_RTPRIO.\n" +
+      pre.to_string());
+  }
+  for (auto & f : pre.findings) {
+    if (f.id == "policy-permission") {
+      f = {"policy-permission", Verdict::Ok, "this process may not set it; capad set it"};
+    }
+  }
+  return pre;
+}
 }  // namespace
 
 // One stage names one thread. Two threads under one declaration would leave the file describing
@@ -806,7 +885,8 @@ auto apply_checked(const Stage & stage) -> Report
   }
   Report rep;
   try {
-    rep = apply_checked(stage.opts, stage.strict);
+    auto pre = refused_for_permission_only(stage);
+    rep = pre ? delegate(stage, name, std::move(*pre)) : apply_checked(stage.opts, stage.strict);
   } catch (...) {
     std::lock_guard<std::mutex> lock(c.m);
     c.by_stage.erase(name);
@@ -815,6 +895,8 @@ auto apply_checked(const Stage & stage) -> Report
       held.name = before->first;
       c.by_stage[before->first] = std::move(before->second);
     }
+    // A request delegate() recorded must not outlive the refusal.
+    (void)republish_locked();
     throw;
   }
   for (auto & f : rep.findings) {
@@ -857,7 +939,7 @@ auto detail::record_bindings(const std::vector<Binding> & held) -> std::string
   entries.reserve(held.size());
   for (const auto & b : held) {
     entries.push_back(
-      {b.node, b.group, b.name, b.pid, b.tid, record::task_starttime(b.pid, b.tid), {}});
+      {b.node, b.group, b.name, b.pid, b.tid, record::task_starttime(b.pid, b.tid), false, {}});
   }
   return record::publish(record::Writer::Daemon, entries);
 }
@@ -884,7 +966,7 @@ auto detail::held_stages() -> std::vector<detail::HeldStage>
   std::vector<HeldStage> out;
   for (const auto & proc : record::read_live()) {
     for (const auto & e : proc.entries) {
-      out.push_back({{e.node, e.group, e.name, e.pid, e.tid}, e.earlier});
+      out.push_back({{e.node, e.group, e.name, e.pid, e.tid}, e.earlier, e.ask});
     }
   }
   return out;
