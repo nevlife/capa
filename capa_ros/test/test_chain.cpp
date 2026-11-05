@@ -1,3 +1,4 @@
+#include "../../capa_core/test/result_test_util.hpp"
 #include "capa/flux.hpp"
 
 #include <flux/partitioned_executor.hpp>
@@ -97,7 +98,7 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
 {
   SpecFile file(kChain);
   ::setenv("CAPA_SPEC", file.path().c_str(), 1);
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   ASSERT_EQ(spec.stages().size(), 3u);
 
   rclcpp::init(0, nullptr);
@@ -127,10 +128,10 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
       opts);
     ex.add_node(s.node);
     // The call under test: the file names the stage, and nothing about its scheduling is here.
-    capa::flux::bind(ex, *s.node, s.group, s.label);
+    must(capa::flux::bind(ex, *s.node, s.group, s.label));
   }
 
-  const capa::Report rep = capa::preflight(spec.stages().front().opts);
+  const capa::Report rep = must(capa::preflight(spec.stages().front().opts));
   const capa::Finding * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
 
@@ -191,34 +192,33 @@ chains:
         policy: fifo
         priority: 30
 )");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_worker", "infer_worker");
   ASSERT_NE(st, nullptr);
   // A value a node cannot derive from its own line, carried by the stage rather than by the call
   // site -- which is why apply_checked takes the stage whole.
   EXPECT_EQ(st->strict, capa::Strictness::Soft);
 
-  const capa::Report rep = capa::preflight(st->opts);
+  const capa::Report rep = must(capa::preflight(st->opts));
   const capa::Finding * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
 
   capa::ThreadState observed;
-  bool threw = false;
+  bool refused = false;
   std::thread worker([&] {
-    try {
-      capa::apply_checked(*st);
+    if (capa::apply_checked(*st)) {
       observed = capa::current();
-    } catch (const std::runtime_error &) {
-      threw = true;
+    } else {
+      refused = true;
     }
   });
   worker.join();
 
   if (perm->verdict != capa::Verdict::Ok) {
-    EXPECT_TRUE(threw) << "an unprivileged apply must refuse, not leave the thread at default";
+    EXPECT_TRUE(refused) << "an unprivileged apply must refuse, not leave the thread at default";
     return;
   }
-  EXPECT_FALSE(threw);
+  EXPECT_FALSE(refused);
   EXPECT_EQ(observed.policy, SCHED_FIFO);
   EXPECT_EQ(observed.priority, 20) << "the worker does not run at the priority the file declared";
 }
@@ -241,7 +241,7 @@ TEST(Chain, VerifySeesADriftAwayFromTheDeclaration)
     "chains:\n  drift:\n    target: soft\n    stages:\n      - node: /rtchain_drift\n"
     "        group: worker\n        policy: other\n        cpus: [" +
     std::to_string(pinned) + "]\n");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_drift", "worker");
   ASSERT_NE(st, nullptr);
 
@@ -249,7 +249,7 @@ TEST(Chain, VerifySeesADriftAwayFromTheDeclaration)
   std::atomic<bool> ready{false};
   std::atomic<bool> stop{false};
   std::thread worker([&] {
-    capa::apply_checked(*st);
+    must(capa::apply_checked(*st));
     tid.store(capa::this_tid());
     ready.store(true);
     while (!stop.load()) {
@@ -300,7 +300,7 @@ TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
     "chains:\n  within:\n    target: soft\n    stages:\n      - node: /rtchain_within\n"
     "        group: worker\n        policy: other\n        cpus: [" +
     std::to_string(hi) + ", " + std::to_string(lo) + "]\n");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_within", "worker");
   ASSERT_NE(st, nullptr);
 
@@ -308,7 +308,7 @@ TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
   std::atomic<bool> ready{false};
   std::atomic<bool> stop{false};
   std::thread worker([&] {
-    capa::apply_checked(*st);
+    must(capa::apply_checked(*st));
     tid.store(capa::this_tid());
     ready.store(true);
     while (!stop.load()) {
@@ -352,7 +352,7 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
     "chains:\n  outside:\n    target: soft\n    stages:\n      - node: /rtchain_outside\n"
     "        group: worker\n        policy: other\n        cpus: [" +
     std::to_string(declared) + "]\n");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_outside", "worker");
   ASSERT_NE(st, nullptr);
 
@@ -360,7 +360,7 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
   std::atomic<bool> ready{false};
   std::atomic<bool> stop{false};
   std::thread worker([&] {
-    capa::apply_checked(*st);
+    must(capa::apply_checked(*st));
     tid.store(capa::this_tid());
     ready.store(true);
     while (!stop.load()) {
@@ -398,8 +398,9 @@ chains:
       - {node: /rtchain_scan, group: worker, policy: fifo, priority: 50}
       - {node: /rtchain_scan, group: pool, policy: fifo, priority: 60, children: inherit}
 )");
-  const auto spec = capa::Spec::load(file.path());
-  const capa::Report perm_rep = capa::preflight(spec.stage("/rtchain_scan", "pool").opts);
+  const auto spec = must(capa::Spec::load(file.path()));
+  const capa::Report perm_rep =
+    must(capa::preflight((*must(spec.stage("/rtchain_scan", "pool"))).opts));
   if (perm_rep.find("policy-permission")->verdict != capa::Verdict::Ok) {
     GTEST_SKIP() << "capa-cap:rtprio host does not permit SCHED_FIFO";
   }
@@ -416,7 +417,7 @@ chains:
     }
   };
   std::thread holder([&] {
-    capa::apply_checked(spec.stage("/rtchain_scan", "worker"));
+    must(capa::apply_checked((*must(spec.stage("/rtchain_scan", "worker")))));
     holder_tid.store(capa::this_tid());
     park();
   });
@@ -428,7 +429,7 @@ chains:
     park();
   });
   std::thread pool([&] {
-    capa::apply_checked(spec.stage("/rtchain_scan", "pool"));
+    must(capa::apply_checked((*must(spec.stage("/rtchain_scan", "pool")))));
     std::thread helper([&] {
       helper_tid.store(capa::this_tid());
       park();
@@ -476,7 +477,7 @@ chains:
         external: true
         expect_priority: 60
 )");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_foreign", "listener");
   ASSERT_NE(st, nullptr);
 
@@ -486,7 +487,7 @@ chains:
   // An rmw listener does not set SCHED_RESET_ON_FORK, and the flag would stop the unprivileged
   // move below from clearing it.
   as_owner_would.children = capa::Children::Inherit;
-  const capa::Report perm_rep = capa::preflight(as_owner_would);
+  const capa::Report perm_rep = must(capa::preflight(as_owner_would));
   const capa::Finding * perm = perm_rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   const bool privileged = perm->verdict == capa::Verdict::Ok;
@@ -498,7 +499,7 @@ chains:
     // Stands in for the thread's real owner: an rmw listener, a driver, a CUDA worker. capa never
     // sets this one, which is what `external` declares.
     if (privileged) {
-      capa::detail::apply(as_owner_would);
+      must(capa::detail::apply(as_owner_would));
     }
     tid.store(capa::this_tid());
     ready.store(true);
@@ -552,7 +553,7 @@ chains:
         policy: fifo
         priority: 20
 )");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_gone", "worker");
   ASSERT_NE(st, nullptr);
 
@@ -584,7 +585,7 @@ chains:
         policy: fifo
         priority: 70
 )");
-  const auto spec = capa::Spec::load(file.path());
+  const auto spec = must(capa::Spec::load(file.path()));
 
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("rtchain_ext");
@@ -592,10 +593,12 @@ chains:
 
   flux::PartitionedExecutor ex;
   ex.add_node(node);
-  const capa::Stage & ext = spec.stage(node->get_fully_qualified_name(), "dds_listener");
-  EXPECT_THROW(capa::flux::apply_checked(ex, *node, group, ext), std::invalid_argument);
-  EXPECT_THROW(capa::apply_checked(ext), std::invalid_argument);
-  EXPECT_NO_THROW(capa::flux::apply_checked(
-    ex, *node, group, spec.stage(node->get_fully_qualified_name(), "work")));
+  const capa::Stage & ext = (*must(spec.stage(node->get_fully_qualified_name(), "dds_listener")));
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(ex, *node, group, ext)), capa::ErrorKind::InvalidArgument);
+  EXPECT_EQ(kind_of(capa::apply_checked(ext)), capa::ErrorKind::InvalidArgument);
+  EXPECT_TRUE((capa::flux::apply_checked(
+                 ex, *node, group, (*must(spec.stage(node->get_fully_qualified_name(), "work")))))
+                .ok());
   rclcpp::shutdown();
 }

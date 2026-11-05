@@ -12,6 +12,9 @@
 namespace capad::bridge
 {
 
+// cxx turns a C++ exception into the Rust Result the bridge declares, and offers no other way.
+using capa::detail::unwrap;
+
 namespace
 {
 
@@ -39,7 +42,7 @@ auto to_std(const rust::String & s) -> std::string
 
 auto load(rust::Str path) -> std::unique_ptr<capa::Spec>
 {
-  return std::make_unique<capa::Spec>(capa::Spec::load(std::string(path)));
+  return std::make_unique<capa::Spec>(unwrap(capa::Spec::load(std::string(path))));
 }
 
 auto stages(const capa::Spec & spec) -> rust::Vec<Stage>
@@ -67,7 +70,7 @@ auto stages(const capa::Spec & spec) -> rust::Vec<Stage>
 auto refusal(const capa::Spec & spec, std::size_t index, int tid) -> rust::String
 {
   const capa::Stage & st = spec.stages().at(index);
-  const capa::Report host = capa::detail::preflight_to(tid, st.opts, 0, st.strict);
+  const capa::Report host = unwrap(capa::detail::preflight_to(tid, st.opts, 0, st.strict));
   const bool warned = std::any_of(host.findings.begin(), host.findings.end(), [](const auto & f) {
     return f.verdict == capa::Verdict::Warn;
   });
@@ -89,12 +92,12 @@ auto drift(const capa::Spec & spec, std::size_t index, int tid) -> rust::String
 void apply(const capa::Spec & spec, std::size_t index, int tid)
 {
   const capa::Stage & st = spec.stages().at(index);
-  capa::detail::apply_checked_to(tid, st.opts, st.strict, 0);
+  unwrap(capa::detail::apply_checked_to(tid, st.opts, st.strict, 0));
 }
 
 auto observe(int tid) -> ThreadState
 {
-  const capa::ThreadState st = capa::observe(tid);
+  const capa::ThreadState st = unwrap(capa::observe(tid));
   ThreadState out;
   out.policy = st.policy;
   out.priority = st.priority;
@@ -125,14 +128,14 @@ void put_back(int tid, const ThreadState & state)
   o.cpus.assign(state.cpus.begin(), state.cpus.end());
   const bool rt = o.policy == capa::Policy::Fifo || o.policy == capa::Policy::RoundRobin;
   o.children = rt && !state.reset_on_fork ? capa::Children::Inherit : capa::Children::Reset;
-  capa::detail::apply_to(tid, o);
+  unwrap(capa::detail::apply_to(tid, o));
 }
 
 void move_to(int tid, rust::Slice<const std::uint32_t> cpus)
 {
   capa::Options o;
   o.cpus = to_std(cpus);
-  capa::detail::apply_to(tid, o);
+  unwrap(capa::detail::apply_to(tid, o));
 }
 
 auto bindings() -> rust::Vec<Binding>
@@ -162,7 +165,7 @@ auto held_stages() -> rust::Vec<HeldStage>
 
 auto daemon_dir() -> rust::String
 {
-  return capa::detail::daemon_dir();
+  return unwrap(capa::detail::daemon_dir());
 }
 
 auto record(rust::Slice<const Binding> held) -> rust::String
@@ -182,7 +185,7 @@ auto task_starttime(int pid, int tid) -> std::uint64_t
 
 void bind(rust::Str target)
 {
-  capa::bind(std::string(target));
+  unwrap(capa::bind(std::string(target)));
 }
 
 auto this_tid() -> int

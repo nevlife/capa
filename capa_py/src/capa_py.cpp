@@ -25,6 +25,8 @@ using namespace nb::literals;
 namespace
 {
 
+using capa::detail::unwrap;
+
 auto cpu_text(const std::vector<std::uint32_t> & cpus) -> std::string
 {
   std::string out;
@@ -49,8 +51,8 @@ NB_MODULE(_capa, m)  // NOLINT(modernize-use-trailing-return-type): the macro wr
     [](const std::exception_ptr & p, void *) {
       try {
         std::rethrow_exception(p);
-      } catch (const std::system_error & e) {
-        PyObject * args = Py_BuildValue("(is)", e.code().value(), e.what());
+      } catch (const capa::detail::SystemFailure & e) {
+        PyObject * args = Py_BuildValue("(is)", e.code(), e.what());
         PyErr_SetObject(PyExc_OSError, args);
         Py_XDECREF(args);
       }
@@ -96,7 +98,7 @@ NB_MODULE(_capa, m)  // NOLINT(modernize-use-trailing-return-type): the macro wr
     .def_rw("priority", &capa::Options::priority)
     .def_rw("cpus", &capa::Options::cpus)
     .def_rw("children", &capa::Options::children)
-    .def("validate", &capa::Options::validate);
+    .def("validate", [](const capa::Options & o) { unwrap(o.validate()); });
 
   nb::class_<capa::ThreadState>(m, "ThreadState")
     .def_ro("policy", &capa::ThreadState::policy, "The raw SCHED_* number; compare os.SCHED_FIFO.")
@@ -166,40 +168,69 @@ NB_MODULE(_capa, m)  // NOLINT(modernize-use-trailing-return-type): the macro wr
     .def_static(
       "load",
       [](std::optional<std::string> path) {
-        return path ? capa::Spec::load(*path) : capa::Spec::load();
+        return unwrap(path ? capa::Spec::load(*path) : capa::Spec::load());
       },
       "path"_a = nb::none())
     .def("empty", &capa::Spec::empty)
     .def("stages", &capa::Spec::stages, nb::rv_policy::reference_internal)
-    .def("stage", &capa::Spec::stage, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
+    .def(
+      "stage",
+      [](const capa::Spec & s, const std::string & target, const std::string & group) {
+        return unwrap(s.stage(target, group));
+      },
+      "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
     .def("find", &capa::Spec::find, "target"_a, "group"_a = "", nb::rv_policy::reference_internal)
     .def("external", &capa::Spec::external, nb::rv_policy::reference_internal)
     .def(
-      "declared", &capa::Spec::declared, "node"_a, "groups"_a, nb::rv_policy::reference_internal,
+      "declared",
+      [](
+        const capa::Spec & s, const std::string & node,
+        const std::vector<capa::GroupContent> & groups) {
+        return unwrap(s.declared(node, groups));
+      },
+      "node"_a, "groups"_a, nb::rv_policy::reference_internal,
       nb::sig("def declared(self, node: str, groups: collections.abc.Sequence[GroupContent]) -> "
               "list[Stage | None]"));
 
   m.def(
-    "preflight", nb::overload_cast<const capa::Options &, int, capa::Strictness>(&capa::preflight),
+    "preflight",
+    [](const capa::Options & opts, int control_priority, capa::Strictness strict) {
+      return unwrap(capa::preflight(opts, control_priority, strict));
+    },
     "opts"_a, "control_priority"_a = 0, "strict"_a = capa::Strictness::Soft);
   m.def("preflight", nb::overload_cast<const capa::Spec &>(&capa::preflight), "spec"_a);
   m.def(
     "apply_checked",
-    nb::overload_cast<const capa::Options &, capa::Strictness, int>(&capa::apply_checked), "opts"_a,
-    "strict"_a = capa::Strictness::Soft, "control_priority"_a = 0);
-  m.def("apply_checked", nb::overload_cast<const capa::Stage &>(&capa::apply_checked), "stage"_a);
-  m.def("bind", &capa::bind, "target"_a, "group"_a = "");
-  m.def("bind_declared", &capa::bind_declared, "target"_a, "group"_a = "");
+    [](const capa::Options & opts, capa::Strictness strict, int control_priority) {
+      return unwrap(capa::apply_checked(opts, strict, control_priority));
+    },
+    "opts"_a, "strict"_a = capa::Strictness::Soft, "control_priority"_a = 0);
+  m.def(
+    "apply_checked", [](const capa::Stage & stage) { return unwrap(capa::apply_checked(stage)); },
+    "stage"_a);
+  m.def(
+    "bind",
+    [](const std::string & target, const std::string & group) {
+      return unwrap(capa::bind(target, group));
+    },
+    "target"_a, "group"_a = "");
+  m.def(
+    "bind_declared",
+    [](const std::string & target, const std::string & group) {
+      return unwrap(capa::bind_declared(target, group));
+    },
+    "target"_a, "group"_a = "");
   m.def("current", &capa::current);
   m.def("this_tid", &capa::this_tid, "The kernel tid; threading.get_ident() is not this number.");
-  m.def("observe", &capa::observe, "tid"_a);
+  m.def("observe", [](int tid) { return unwrap(capa::observe(tid)); }, "tid"_a);
   m.def(
     "verify", &capa::verify, "stage"_a, "tid"_a, "window"_a = std::chrono::milliseconds{0},
     nb::call_guard<nb::gil_scoped_release>());
   m.def("verify_process", nb::overload_cast<const capa::Spec &>(&capa::verify_process), "spec"_a);
   m.def(
-    "verify_process", nb::overload_cast<const capa::Spec &, int>(&capa::verify_process), "spec"_a,
-    "pid"_a);
+    "verify_process",
+    [](const capa::Spec & spec, int pid) { return unwrap(capa::verify_process(spec, pid)); },
+    "spec"_a, "pid"_a);
 
   nb::class_<capa::Binding>(m, "Binding")
     .def_ro("node", &capa::Binding::node)

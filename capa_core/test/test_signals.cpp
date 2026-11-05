@@ -1,4 +1,5 @@
 #include "capa/spec.hpp"
+#include "result_test_util.hpp"
 
 #include <gtest/gtest.h>
 #include <sched.h>

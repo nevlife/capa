@@ -1,6 +1,8 @@
 #ifndef CAPA_RT_HPP
 #define CAPA_RT_HPP
 
+#include "capa/result.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -28,17 +30,17 @@ struct Options
   std::vector<std::uint32_t> cpus;      // pin to these cores; empty = leave affinity alone
   Children children = Children::Reset;  // takes effect only with Fifo/RoundRobin
 
-  void validate() const;
+  [[nodiscard]] auto validate() const -> Result<void>;
 };
 
 namespace detail
 {
-// The syscalls alone, all-or-nothing: a refused part rolls back and throws std::system_error.
+// The syscalls alone, all-or-nothing: a refused part rolls back and returns a System error.
 // No preflight and no read-back, so the public way in is apply_checked() or bind().
-void apply(const Options & opts);
+auto apply(const Options & opts) -> Result<void>;
 
 // On thread `tid` (0 = caller). Daemon only: a thread set from outside runs unscheduled until then.
-void apply_to(int tid, const Options & opts);
+auto apply_to(int tid, const Options & opts) -> Result<void>;
 }  // namespace detail
 
 struct ThreadState
@@ -50,17 +52,17 @@ struct ThreadState
 };
 auto current() -> ThreadState;
 
-auto this_tid() -> int;
+auto this_tid() noexcept -> int;  // the kernel tid; -1 off Linux, where capa sets nothing
 
-// Throws std::system_error when the thread cannot be read, an exited one included: a thread that
-// is gone must not read as a thread at the wrong priority.
-auto observe(int tid) -> ThreadState;
+// A System error when the thread cannot be read, an exited one included: a thread that is gone
+// must not read as a thread at the wrong priority.
+auto observe(int tid) -> Result<ThreadState>;
 
 // Info is a fact worth knowing that blocks nothing, at any strictness.
 enum class Verdict : std::uint8_t { Ok, Warn, Fail, Unknown, Info };
 
 enum class Strictness : std::uint8_t {
-  Soft,  // Warn findings are returned, not thrown
+  Soft,  // Warn findings are returned, and the apply goes on
   Hard,  // Warn findings block the apply
 };
 
@@ -84,27 +86,28 @@ struct Report
 // control_priority 0 reports `priority-order` Unknown: a check that did not run must not pass.
 // `strict` is how the request will be read: some findings are a Warn only for a hard stage.
 auto preflight(const Options & opts, int control_priority = 0, Strictness strict = Strictness::Soft)
-  -> Report;
+  -> Result<Report>;
 
-// A blocking verdict throws before the thread is touched. The result is read back, since an
-// accepted request can still land elsewhere; a mismatch throws with the thread already changed.
+// A blocking verdict fails before the thread is touched. The result is read back, since an
+// accepted request can still land elsewhere; a mismatch fails with the thread already changed.
 auto apply_checked(
-  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0) -> Report;
+  const Options & opts, Strictness strict = Strictness::Soft,
+  int control_priority = 0) -> Result<Report>;
 
 namespace detail
 {
 // The daemon's, on thread `tid`: memory-lock is judged on its process; read-back is observe().
 auto preflight_to(
   int tid, const Options & opts, int control_priority,
-  Strictness strict = Strictness::Soft) -> Report;
+  Strictness strict = Strictness::Soft) -> Result<Report>;
 auto apply_checked_to(int tid, const Options & opts, Strictness strict, int control_priority)
-  -> Report;
+  -> Result<Report>;
 // Why `got` is not what `opts` asks for, or "" when it is.
 auto mismatch(const Options & opts, const ThreadState & got) -> std::string;
 // preflight_to with every /proc and /sys path read under `root`, for tests on host snapshots.
 auto preflight_at(
   const std::string & root, int tid, const Options & opts, int control_priority,
-  Strictness strict = Strictness::Soft) -> Report;
+  Strictness strict = Strictness::Soft) -> Result<Report>;
 }  // namespace detail
 
 }  // namespace capa

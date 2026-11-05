@@ -1,4 +1,5 @@
 #include "capa/spec.hpp"
+#include "result_test_util.hpp"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -54,7 +55,7 @@ auto holder(const std::string & spec, const std::string & group, int & tid) -> p
   if (pid == 0) {
     ::close(fds[0]);
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
-    capa::bind("/rec", group);
+    must(capa::bind("/rec", group));
     const int me = capa::this_tid();
     if (::write(fds[1], &me, sizeof me) != sizeof me) {
       ::_exit(1);
@@ -111,7 +112,7 @@ TEST(Record, AnotherProcessSeesTheStageAThreadHolds)
   ASSERT_GT(tid, 0);
 
   EXPECT_TRUE(bound(pid, tid)) << "the holder's stage is not in bindings()";
-  const capa::Report rep = capa::verify_process(capa::Spec::load(spec), pid);
+  const capa::Report rep = must(capa::verify_process(must(capa::Spec::load(spec)), pid));
   EXPECT_TRUE(rep.ok()) << rep.to_string();
   EXPECT_EQ(rep.find("record"), nullptr) << "the holder has a record:\n" << rep.to_string();
 
@@ -143,7 +144,7 @@ TEST(Record, AForkedChildDoesNotKeepItsParentAlive)
   if (parent == 0) {
     ::close(fds[0]);
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
-    capa::bind("/rec", "work");
+    must(capa::bind("/rec", "work"));
     const pid_t child = ::fork();
     if (child == 0) {
       for (;;) {
@@ -174,10 +175,12 @@ TEST(Record, AProcessThatIsGoneIsAFailure)
   int tid = 0;
   const pid_t pid = holder(spec, "work", tid);
   reap(pid);
-  const capa::Report rep = capa::verify_process(capa::Spec::load(spec), pid);
+  const capa::Report rep = must(capa::verify_process(must(capa::Spec::load(spec)), pid));
   ASSERT_NE(rep.find("observed-process"), nullptr) << rep.to_string();
   EXPECT_EQ(rep.find("observed-process")->verdict, capa::Verdict::Fail);
-  EXPECT_THROW(capa::verify_process(capa::Spec::load(spec), 0), std::invalid_argument);
+  EXPECT_EQ(
+    kind_of(capa::verify_process(must(capa::Spec::load(spec)), 0)),
+    capa::ErrorKind::InvalidArgument);
   std::remove(spec.c_str());
 }
 
@@ -193,7 +196,7 @@ TEST(Record, AnUnwritableRecordIsReportedNotHidden)
     ::close(fds[0]);
     ::setenv("CAPA_RUN_DIR", "/nonexistent/capa", 1);
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
-    const capa::Report rep = capa::bind("/rec", "work");
+    const capa::Report rep = must(capa::bind("/rec", "work"));
     const capa::Finding * f = rep.find("record");
     const char verdict = f == nullptr ? 'n' : f->verdict == capa::Verdict::Unknown ? 'u' : 'x';
     if (::write(fds[1], &verdict, 1) != 1) {
@@ -401,7 +404,7 @@ TEST(Record, ABindRecordsTheThreadsThatCameBeforeIt)
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     ::setenv("CAPA_SPEC", spec.c_str(), 1);
-    capa::bind("/rec", "work");
+    must(capa::bind("/rec", "work"));
     std::thread a([&] {
       after.store(capa::this_tid());
       for (;;) {
@@ -480,11 +483,11 @@ TEST(Record, AThreadTheDaemonSetCountsAsRecorded)
   ::close(fds[0]);
   ASSERT_EQ(c, 'y') << "the daemon could not write its record";
 
-  const capa::Report rep = capa::verify_process(capa::Spec::load(spec), target);
+  const capa::Report rep = must(capa::verify_process(must(capa::Spec::load(spec)), target));
   EXPECT_EQ(rep.find("record"), nullptr) << rep.to_string();
 
   reap(daemon);
-  const capa::Report after = capa::verify_process(capa::Spec::load(spec), target);
+  const capa::Report after = must(capa::verify_process(must(capa::Spec::load(spec)), target));
   EXPECT_NE(after.find("record"), nullptr) << "with no record naming it, the holders are unknown";
 
   reap(target);

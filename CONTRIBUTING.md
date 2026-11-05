@@ -35,13 +35,13 @@ C++와 Python이 함께 약속하는 것을 한 행에 하나씩 적고, 그 약
 | X-002 | bind는 호출한 스레드를 stage에 걸고 커널에서 되읽는다 | `Bind.PutsTheCallingThreadOnItsStage` | `test_bind_puts_the_calling_thread_on_its_stage` |
 | X-003 | 파일에 없는 라벨은 무시하지 않고 거절한다 | `Bind.ATypoIsRefusedNotIgnored` | `test_bind_refuses_an_unknown_label` |
 | X-004 | spawn은 스레드가 걸린 뒤에만 함수를 돌린다 | `Spawn.RunsTheFunctionOnlyAfterTheThreadIsSet` | `test_spawn_runs_the_function_after_the_thread_is_set` |
-| X-005 | 거절된 spawn은 호출자에게 던지고 함수를 돌리지 않는다 | `Spawn.ARefusalReachesTheCallerAndTheFunctionNeverRuns` | `test_spawn_raises_the_refusal_and_never_runs_the_function` |
+| X-005 | 거절된 spawn은 호출자에게 거절을 돌려주고 함수를 돌리지 않는다 | `Spawn.ARefusalReachesTheCallerAndTheFunctionNeverRuns` | `test_spawn_raises_the_refusal_and_never_runs_the_function` |
 | X-006 | children=reset이면 자식은 SCHED_OTHER로, inherit이면 부모 정책으로 시작한다 | `Rt.ChildrenFollowTheDeclaredPolicy` | `test_children_follow_the_declared_policy` |
 | X-007 | 아무것도 요청하지 않는 Options는 판정까지 포함해 아무것도 하지 않는다 | `Rt.ApplyCheckedIsANoOpForOptionsThatAskNothing` | `test_an_empty_request_is_a_no_op` |
 | X-008 | 다르게 해석될 요청은 잘라 맞추지 않고 거절한다 | `Rt.ValidateRejectsReinterpretableCombos` | `test_an_out_of_range_priority_is_rejected` |
 | X-009 | preflight가 Fail한 요청은 스레드를 건드리기 전에 거절한다 | `Rt.ApplyCheckedRefusesWhatPreflightFails` | `test_a_cpu_this_host_does_not_have_is_refused` |
 | X-010 | 한 stage는 살아 있는 스레드 하나가 쥔다. 쥔 스레드는 다시 걸 수 있고 끝나면 풀린다 | `Spec.OneStageIsHeldByOneLiveThread` | `test_one_stage_is_held_by_one_live_thread` |
-| X-011 | stage는 노드 전체 이름과 라벨로 찾고, 없는 라벨은 예외를 던진다 | `Spec.LookupByNodeRejectsAnUnknownLabel` | `test_a_stage_is_looked_up_by_node_and_label` |
+| X-011 | stage는 노드 전체 이름과 라벨로 찾고, 없는 라벨은 거절한다 | `Spec.LookupByNodeRejectsAnUnknownLabel` | `test_a_stage_is_looked_up_by_node_and_label` |
 | X-012 | external stage는 거는 진입점 전부가 거절한다 | `Chain.AnExternalStageIsRefusedByBothEntryPoints` | `test_an_external_stage_is_refused` |
 | X-013 | verify는 선언에서 벗어난 스레드를 Fail로 본다 | `Chain.VerifySeesADriftAwayFromTheDeclaration` | `test_verify_sees_a_drift_away_from_the_declaration` |
 | X-014 | verify_process는 stage를 쥔 스레드와 inherit 자식을 설명하고 나머지를 보고한다 | `Chain.VerifyProcessNamesOnlyTheThreadsTheFileCannotExplain` | `test_verify_process_names_only_threads_the_file_cannot_explain` |

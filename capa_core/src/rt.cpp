@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -33,9 +32,15 @@ namespace
 // Matches glibc CPU_SETSIZE; validate() must not depend on <sched.h> being present.
 constexpr std::uint32_t kMaxCpus = 1024;
 
-[[noreturn]] void fail(const std::string & why)
+auto invalid(const std::string & why) -> Error
 {
-  throw std::invalid_argument("capa: " + why);
+  return {ErrorKind::InvalidArgument, "capa: " + why};
+}
+
+// The errno text goes in the message: a log gets this string and no code.
+auto refused(int code, const std::string & why) -> Error
+{
+  return {ErrorKind::System, why + ": " + std::generic_category().message(code), code};
 }
 
 auto is_rt_policy(Policy p) -> bool
@@ -89,47 +94,49 @@ auto native_policy(Policy p) -> int
 
 }  // namespace
 
-void Options::validate() const
+auto Options::validate() const -> Result<void>
 {
   const bool rt = is_rt_policy(policy);
   if (rt && (priority < 1 || priority > 99)) {
-    fail(
+    return invalid(
       std::string(policy_name(policy)) + " needs priority 1..99, got " + std::to_string(priority));
   }
   if (!rt && priority != 0) {
-    fail(
+    return invalid(
       "priority " + std::to_string(priority) + " with policy " + policy_name(policy) +
       " would be ignored; set policy=Fifo or RoundRobin, or drop the priority");
   }
   if (!rt && children == Children::Inherit) {
-    fail(
+    return invalid(
       std::string("children=inherit with policy ") + policy_name(policy) +
       " would be ignored; only an RT policy passes anything on to children");
   }
   for (auto c : cpus) {
     if (c >= kMaxCpus) {
-      fail(
+      return invalid(
         "cpu id " + std::to_string(c) + " exceeds the kernel set size " + std::to_string(kMaxCpus));
     }
   }
+  return {};
 }
 
-void detail::apply_to(int tid, const Options & opts)
+auto detail::apply_to(int tid, const Options & opts) -> Result<void>
 {
-  opts.validate();
+  if (auto valid = opts.validate(); !valid) {
+    return valid;
+  }
   const bool want_policy = opts.policy != Policy::Inherit;
   const bool want_cpus = !opts.cpus.empty();
   if (!want_policy && !want_cpus) {
-    return;
+    return {};
   }
 #if !defined(__linux__)
-  throw std::system_error(
-    std::make_error_code(std::errc::function_not_supported), "capa: apply targets Linux");
+  return refused(ENOSYS, "capa: apply targets Linux");
 #else
   cpu_set_t old_set;
   if (want_cpus) {
     if (::sched_getaffinity(tid, sizeof old_set, &old_set) != 0) {
-      throw std::system_error(errno, std::generic_category(), "capa: sched_getaffinity");
+      return refused(errno, "capa: sched_getaffinity");
     }
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -138,9 +145,8 @@ void detail::apply_to(int tid, const Options & opts)
     }
     if (::sched_setaffinity(tid, sizeof set, &set) != 0) {
       const int e = errno;
-      throw std::system_error(
-        e, std::generic_category(),
-        std::string("capa: sched_setaffinity refused the requested cpus") + refusal(tid, e));
+      return refused(
+        e, std::string("capa: sched_setaffinity refused the requested cpus") + refusal(tid, e));
     }
   }
   if (want_policy) {
@@ -159,18 +165,18 @@ void detail::apply_to(int tid, const Options & opts)
           ? "; this thread was set with children=reset before, and only CAP_SYS_NICE can clear "
             "that"
           : refusal(tid, e);
-      throw std::system_error(
-        e, std::generic_category(),
-        "capa: sched_setscheduler(" + std::string(policy_name(opts.policy)) + ", " +
-          std::to_string(opts.priority) + ") refused" + why);
+      return refused(
+        e, "capa: sched_setscheduler(" + std::string(policy_name(opts.policy)) + ", " +
+             std::to_string(opts.priority) + ") refused" + why);
     }
   }
+  return {};
 #endif
 }
 
-void detail::apply(const Options & opts)
+auto detail::apply(const Options & opts) -> Result<void>
 {
-  apply_to(0, opts);
+  return apply_to(0, opts);
 }
 
 auto current() -> ThreadState
@@ -196,44 +202,42 @@ auto current() -> ThreadState
   return st;
 }
 
-auto this_tid() -> int
+auto this_tid() noexcept -> int
 {
 #if !defined(__linux__)
-  throw std::system_error(
-    std::make_error_code(std::errc::function_not_supported), "capa: this_tid targets Linux");
+  return -1;
 #else
   return static_cast<int>(::syscall(SYS_gettid));
 #endif
 }
 
-auto observe(int tid) -> ThreadState
+auto observe(int tid) -> Result<ThreadState>
 {
   // Not a convenience for self: sched_getscheduler reads the caller when handed 0, so an
   // uninitialized tid would answer about the wrong thread and look like a successful check.
   if (tid <= 0) {
-    fail("observe needs a thread id; 0 would read the calling thread instead");
+    return invalid("observe needs a thread id; 0 would read the calling thread instead");
   }
 #if !defined(__linux__)
-  throw std::system_error(
-    std::make_error_code(std::errc::function_not_supported), "capa: observe targets Linux");
+  return refused(ENOSYS, "capa: observe targets Linux");
 #else
   const std::string who = "capa: observe(" + std::to_string(tid) + ")";
   ThreadState st;
   errno = 0;
   const int raw = ::sched_getscheduler(tid);
   if (raw < 0) {
-    throw std::system_error(errno, std::generic_category(), who);
+    return refused(errno, who);
   }
   st.policy = raw & ~SCHED_RESET_ON_FORK;
   st.reset_on_fork = (raw & SCHED_RESET_ON_FORK) != 0;
   sched_param param{};
   if (::sched_getparam(tid, &param) != 0) {
-    throw std::system_error(errno, std::generic_category(), who + " sched_getparam");
+    return refused(errno, who + " sched_getparam");
   }
   st.priority = param.sched_priority;
   cpu_set_t set;
   if (::sched_getaffinity(tid, sizeof set, &set) != 0) {
-    throw std::system_error(errno, std::generic_category(), who + " sched_getaffinity");
+    return refused(errno, who + " sched_getaffinity");
   }
   for (int c = 0; c < CPU_SETSIZE; ++c) {
     if (CPU_ISSET(c, &set)) {
@@ -279,22 +283,24 @@ auto Report::to_string() const -> std::string
   return out;
 }
 
-auto preflight(const Options & opts, int control_priority, Strictness strict) -> Report
+auto preflight(const Options & opts, int control_priority, Strictness strict) -> Result<Report>
 {
   return detail::preflight_to(0, opts, control_priority, strict);
 }
 
 auto detail::preflight_to(int tid, const Options & opts, int control_priority, Strictness strict)
-  -> Report
+  -> Result<Report>
 {
   return preflight_at("", tid, opts, control_priority, strict);
 }
 
 auto detail::preflight_at(
   const std::string & root, int tid, const Options & opts, int control_priority,
-  Strictness strict) -> Report
+  Strictness strict) -> Result<Report>
 {
-  opts.validate();
+  if (auto valid = opts.validate(); !valid) {
+    return valid.error();
+  }
   Report rep;
   host::preflight_into(rep, host::Fs(root), tid, opts, control_priority, strict);
   return rep;
@@ -344,24 +350,32 @@ auto detail::mismatch(const Options & opts, const ThreadState & got) -> std::str
 }
 
 auto detail::apply_checked_to(
-  int tid, const Options & opts, Strictness strict, int control_priority) -> Report
+  int tid, const Options & opts, Strictness strict, int control_priority) -> Result<Report>
 {
-  opts.validate();
+  if (auto valid = opts.validate(); !valid) {
+    return valid.error();
+  }
   // Same no-op contract as apply(): options that ask for nothing get nothing, including no
   // judgement. Preflighting here would report a host that no caller asked anything of.
   if (opts.policy == Policy::Inherit && opts.cpus.empty()) {
     return Report{};
   }
 
-  Report rep = detail::preflight_to(tid, opts, control_priority, strict);
+  auto pre = detail::preflight_to(tid, opts, control_priority, strict);
+  if (!pre) {
+    return pre;
+  }
+  Report rep = *std::move(pre);
   const bool blocked = !rep.ok() || (strict == Strictness::Hard && has_warn(rep));
   if (blocked) {
-    throw std::runtime_error(
-      std::string("capa: preflight refused this ") +
-      (strict == Strictness::Hard ? "hard" : "soft") + "-RT request; nothing was applied\n" +
-      rep.to_string());
+    return Error{
+      ErrorKind::Failed, std::string("capa: preflight refused this ") +
+                           (strict == Strictness::Hard ? "hard" : "soft") +
+                           "-RT request; nothing was applied\n" + rep.to_string()};
   }
-  detail::apply_to(tid, opts);
+  if (auto applied = detail::apply_to(tid, opts); !applied) {
+    return applied.error();
+  }
 
   // Confirm by reading back rather than by trusting the syscall's return: nothing stops another
   // thread from re-scheduling this one between the two calls. Trusting the return is the same
@@ -371,15 +385,19 @@ auto detail::apply_checked_to(
   // to the cpus it allows, and a thread on fewer of its requested cpus has left none of them;
   // a cpu outside the request is the failure. verify() reads the same claim afterwards.
 #if defined(__linux__)
-  const std::string off = detail::mismatch(opts, tid == 0 ? current() : observe(tid));
+  auto got = tid == 0 ? Result<ThreadState>(current()) : observe(tid);
+  if (!got) {
+    return got.error();
+  }
+  const std::string off = detail::mismatch(opts, *got);
   if (!off.empty()) {
-    throw std::runtime_error(off);
+    return Error{ErrorKind::Failed, off};
   }
 #endif
   return rep;
 }
 
-auto apply_checked(const Options & opts, Strictness strict, int control_priority) -> Report
+auto apply_checked(const Options & opts, Strictness strict, int control_priority) -> Result<Report>
 {
   return detail::apply_checked_to(0, opts, strict, control_priority);
 }

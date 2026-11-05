@@ -1,3 +1,4 @@
+#include "../../capa_core/test/result_test_util.hpp"
 #include "capa/flux.hpp"
 
 #include <flux/partitioned_executor.hpp>
@@ -24,9 +25,10 @@
 
 using namespace std::chrono_literals;
 
-// capa::flux::apply_checked(): the child thread serving the group applies the declared scheduling
-// to itself before its first callback. Affinity needs no privilege, so it proves end to end that
-// the options reach the child thread: the callback reads its own affinity back from the kernel.
+// must(capa::flux::apply_checked()): the child thread serving the group applies the declared
+// scheduling to itself before its first callback. Affinity needs no privilege, so it proves end to
+// end that the options reach the child thread: the callback reads its own affinity back from the
+// kernel.
 TEST(Schedule, ScheduleReachesTheChildThread)
 {
   rclcpp::init(0, nullptr);
@@ -53,7 +55,7 @@ TEST(Schedule, ScheduleReachesTheChildThread)
   ex.add_node(sub_node);
   capa::Options sched;
   sched.cpus = {0};
-  capa::flux::apply_checked(ex, *sub_node, g, sched);
+  must(capa::flux::apply_checked(ex, *sub_node, g, sched));
 
   std::thread spinner([&] { ex.spin(); });
 
@@ -81,7 +83,7 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
   capa::Options sched;
   sched.policy = capa::Policy::Fifo;
   sched.priority = 1;
-  const capa::Report rep = capa::preflight(sched);
+  const capa::Report rep = must(capa::preflight(sched));
   const capa::Finding * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
 
@@ -107,7 +109,7 @@ TEST(Schedule, ScheduleFifoMatchesPreflight)
 
   flux::PartitionedExecutor ex;
   ex.add_node(sub_node);
-  capa::flux::apply_checked(ex, *sub_node, g, sched);
+  must(capa::flux::apply_checked(ex, *sub_node, g, sched));
 
   if (perm->verdict != capa::Verdict::Ok) {
     // std::runtime_error, not system_error: the child goes through capa::apply_checked, so the
@@ -146,37 +148,41 @@ TEST(Schedule, ScheduleRejects)
   ex.add_node(node);
 
   auto foreign = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  EXPECT_THROW(
-    capa::flux::apply_checked(ex, *node, foreign, capa::Options{}), std::invalid_argument);
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(ex, *node, foreign, capa::Options{})),
+    capa::ErrorKind::InvalidArgument);
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   capa::Options bad;
   bad.policy = capa::Policy::Fifo;  // priority 0 with an RT policy: reinterpretable
-  EXPECT_THROW(capa::flux::apply_checked(ex, *node, g, bad), std::invalid_argument);
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(ex, *node, g, bad)), capa::ErrorKind::InvalidArgument);
 
-  capa::flux::apply_checked(ex, *node, g, capa::Options{});
-  EXPECT_THROW(
-    capa::flux::apply_checked(ex, *node, g, capa::Options{}),
-    std::invalid_argument);  // one declaration per group
-  EXPECT_NO_THROW(capa::flux::apply_checked(ex, *node, nullptr, capa::Options{}));
-  EXPECT_THROW(
-    capa::flux::apply_checked(
-      ex, *node, node->get_node_base_interface()->get_default_callback_group(), capa::Options{}),
-    std::invalid_argument)
+  must(capa::flux::apply_checked(ex, *node, g, capa::Options{}));
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(ex, *node, g, capa::Options{})),
+    capa::ErrorKind::InvalidArgument);  // one declaration per group
+  EXPECT_TRUE((capa::flux::apply_checked(ex, *node, nullptr, capa::Options{})).ok());
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(
+      ex, *node, node->get_node_base_interface()->get_default_callback_group(), capa::Options{})),
+    capa::ErrorKind::InvalidArgument)
     << "nullptr and the default group are the same group";
 
   // A group of a node never handed over: no child will serve it, so the declaration would
   // silently never apply. spin() refuses to start.
   auto stray_node = std::make_shared<rclcpp::Node>("cie_sched_stray");
   auto stray = stray_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  capa::flux::apply_checked(ex, *stray_node, stray, capa::Options{});
+  must(capa::flux::apply_checked(ex, *stray_node, stray, capa::Options{}));
   EXPECT_THROW(ex.spin(), std::invalid_argument);
 
   flux::PartitionedExecutor ex2;
   ex2.add_node(node);
   std::thread spinner([&] { ex2.spin(); });
   std::this_thread::sleep_for(100ms);
-  EXPECT_THROW(capa::flux::apply_checked(ex2, *node, g, capa::Options{}), std::logic_error);
+  EXPECT_EQ(
+    kind_of(capa::flux::apply_checked(ex2, *node, g, capa::Options{})),
+    capa::ErrorKind::InvalidArgument);
   ex2.cancel();
   spinner.join();
   rclcpp::shutdown();
@@ -191,7 +197,7 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
 
   capa::Options opts;
   opts.cpus = {0};
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   bool warned = false;
   for (const auto & f : rep.findings) {
     if (f.verdict == capa::Verdict::Warn) {
@@ -206,7 +212,7 @@ TEST(Schedule, HardStrictnessSurfacesAsASpinError)
   flux::PartitionedExecutor ex;
   ex.add_node(node);
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  capa::flux::apply_checked(ex, *node, g, opts, capa::Strictness::Hard);
+  must(capa::flux::apply_checked(ex, *node, g, opts, capa::Strictness::Hard));
 
   EXPECT_THROW(ex.spin(), std::runtime_error);
 
@@ -246,14 +252,11 @@ int SpecFile::counter_ = 0;
 template <typename F>
 std::string refusal(F && call)
 {
-  try {
-    std::forward<F>(call)();
-  } catch (const std::invalid_argument & e) {
-    return e.what();
-  } catch (...) {
-    return "<wrong exception type>";
+  const auto r = std::forward<F>(call)();
+  if (r) {
+    return "<no error>";
   }
-  return "<no exception>";
+  return r.error().kind == capa::ErrorKind::InvalidArgument ? r.error().what : "<wrong error kind>";
 }
 
 // Affinity only: these cases are about which thread a stage names, and applying a real RT policy
@@ -277,12 +280,12 @@ TEST(ScheduleStage, RejectsAStageWhoseNodeIsNotTheNodeHandedOver)
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_label");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::PartitionedExecutor ex;
-  const std::string why =
-    refusal([&] { capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
+  const std::string why = refusal(
+    [&] { return capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("but was handed node"), std::string::npos) << why;
@@ -294,12 +297,12 @@ TEST(ScheduleStage, RejectsAGroupOfAnotherNode)
   auto node = std::make_shared<rclcpp::Node>("cie_label");
   auto other = std::make_shared<rclcpp::Node>("cie_label_other");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   auto g = other->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::PartitionedExecutor ex;
-  const std::string why =
-    refusal([&] { capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer")); });
+  const std::string why = refusal(
+    [&] { return capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer")); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("does not belong to node"), std::string::npos) << why;
@@ -310,11 +313,11 @@ TEST(ScheduleStage, RejectsALabelledStageOnTheDefaultGroup)
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_label");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   flux::PartitionedExecutor ex;
   const std::string why = refusal([&] {
-    capa::flux::apply_checked(
+    return capa::flux::apply_checked(
       ex, *node, node->get_node_base_interface()->get_default_callback_group(),
       *spec.find("/cie_label", "infer"));
   });
@@ -328,12 +331,12 @@ TEST(ScheduleStage, RejectsAnUnlabelledStageOnANamedGroup)
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_label_other");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::PartitionedExecutor ex;
-  const std::string why =
-    refusal([&] { capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
+  const std::string why = refusal(
+    [&] { return capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label_other")); });
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("names no group"), std::string::npos) << why;
@@ -344,12 +347,12 @@ TEST(ScheduleStage, AcceptsAStageOnTheGroupItNames)
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_label");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::PartitionedExecutor ex;
   ex.add_node(node);
-  capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer"));
+  must(capa::flux::apply_checked(ex, *node, g, *spec.find("/cie_label", "infer")));
 
   std::thread spinner([&] { ex.spin(); });
   std::this_thread::sleep_for(100ms);
@@ -365,17 +368,22 @@ TEST(ScheduleStage, RejectsOneStageOnTwoGroups)
   rclcpp::init(0, nullptr);
   auto node = std::make_shared<rclcpp::Node>("cie_label");
   SpecFile f(kLabelSpec);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
   auto ga = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   auto gb = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   flux::PartitionedExecutor ex;
   ex.add_node(node);
   const auto & stage = *spec.find("/cie_label", "infer");
-  capa::flux::apply_checked(ex, *node, ga, stage);
-  capa::flux::apply_checked(ex, *node, gb, stage);
+  must(capa::flux::apply_checked(ex, *node, ga, stage));
+  must(capa::flux::apply_checked(ex, *node, gb, stage));
 
-  const std::string why = refusal([&] { ex.spin(); });
+  std::string why = "<no exception>";
+  try {
+    ex.spin();
+  } catch (const std::invalid_argument & e) {
+    why = e.what();
+  }
   rclcpp::shutdown();
 
   EXPECT_NE(why.find("one stage declares one thread"), std::string::npos) << why;
@@ -460,23 +468,24 @@ TEST(Container, DeclaredFindsTheGroupByWhatItHolds)
     Holder h;
     auto stranger = std::make_shared<rclcpp::Node>("cie_holds_other");
     SpecFile f(holds_spec(0, 0));
-    const auto spec = capa::Spec::load(f.path());
+    const auto spec = must(capa::Spec::load(f.path()));
     auto & base = *h.node->get_node_base_interface();
 
-    const capa::Stage * traj = capa::flux::declared(spec, base, h.traj);
+    const capa::Stage * traj = must(capa::flux::declared(spec, base, h.traj));
     ASSERT_NE(traj, nullptr);
     EXPECT_EQ(traj->group, "traj");
-    EXPECT_EQ(capa::flux::declared(spec, base, h.other), nullptr);
-    const capa::Stage * dflt = capa::flux::declared(spec, base, nullptr);
+    EXPECT_EQ(must(capa::flux::declared(spec, base, h.other)), nullptr);
+    const capa::Stage * dflt = must(capa::flux::declared(spec, base, nullptr));
     ASSERT_NE(dflt, nullptr);
     EXPECT_EQ(dflt->group, "");
 
     const auto g = stranger->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    EXPECT_THROW(capa::flux::declared(spec, base, g), std::invalid_argument);
+    EXPECT_EQ(kind_of(capa::flux::declared(spec, base, g)), capa::ErrorKind::InvalidArgument);
 
     flux::PartitionedExecutor ex;
-    const std::string why = refusal(
-      [&] { capa::flux::apply_checked(ex, *h.node, h.other, *spec.find("/cie_holds", "traj")); });
+    const std::string why = refusal([&] {
+      return capa::flux::apply_checked(ex, *h.node, h.other, *spec.find("/cie_holds", "traj"));
+    });
     EXPECT_NE(why.find("does not"), std::string::npos) << why;
   }
   rclcpp::shutdown();
@@ -518,7 +527,7 @@ TEST(Container, BindDeclaredReachesTheGroupThatHoldsTheSubscription)
 
     flux::PartitionedExecutor ex;
     ex.add_node(h.node);
-    capa::flux::bind_declared(ex, *h.node->get_node_base_interface());
+    must(capa::flux::bind_declared(ex, *h.node->get_node_base_interface()));
 
     std::thread spinner([&] { ex.spin(); });
     const auto deadline = std::chrono::steady_clock::now() + 5s;

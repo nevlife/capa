@@ -1,4 +1,5 @@
 #include "capa/rt.hpp"
+#include "result_test_util.hpp"
 
 #include <gtest/gtest.h>
 #include <sched.h>
@@ -8,6 +9,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -53,30 +55,30 @@ struct RestoreThread
 
 TEST(Rt, ValidateRejectsReinterpretableCombos)
 {
-  EXPECT_NO_THROW(capa::Options{}.validate());
+  EXPECT_TRUE((capa::Options{}.validate()).ok());
 
   capa::Options fifo_no_prio;
   fifo_no_prio.policy = capa::Policy::Fifo;
-  EXPECT_THROW(fifo_no_prio.validate(), std::invalid_argument);
+  EXPECT_EQ(kind_of(fifo_no_prio.validate()), capa::ErrorKind::InvalidArgument);
 
   capa::Options prio_no_policy;
   prio_no_policy.priority = 10;
-  EXPECT_THROW(prio_no_policy.validate(), std::invalid_argument);
+  EXPECT_EQ(kind_of(prio_no_policy.validate()), capa::ErrorKind::InvalidArgument);
 
   capa::Options over;
   over.policy = capa::Policy::RoundRobin;
   over.priority = 100;
-  EXPECT_THROW(over.validate(), std::invalid_argument);
+  EXPECT_EQ(kind_of(over.validate()), capa::ErrorKind::InvalidArgument);
 
   capa::Options bad_cpu;
   bad_cpu.cpus = {100000};
-  EXPECT_THROW(bad_cpu.validate(), std::invalid_argument);
+  EXPECT_EQ(kind_of(bad_cpu.validate()), capa::ErrorKind::InvalidArgument);
 }
 
 TEST(Rt, ApplyOfDefaultOptionsChangesNothing)
 {
   const auto before = capa::current();
-  capa::detail::apply(capa::Options{});
+  must(capa::detail::apply(capa::Options{}));
   const auto after = capa::current();
   EXPECT_EQ(before.policy, after.policy);
   EXPECT_EQ(before.priority, after.priority);
@@ -90,7 +92,7 @@ TEST(Rt, ApplyPinsTheCallingThread)
   ASSERT_FALSE(before.cpus.empty());
   capa::Options opts;
   opts.cpus = {before.cpus.front()};
-  capa::detail::apply(opts);
+  must(capa::detail::apply(opts));
   EXPECT_EQ(capa::current().cpus, opts.cpus);
 }
 
@@ -100,16 +102,16 @@ TEST(Rt, ApplyMatchesPreflightPermissionVerdict)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict == capa::Verdict::Ok) {
-    capa::detail::apply(opts);
+    must(capa::detail::apply(opts));
     const auto state = capa::current();
     EXPECT_EQ(state.policy, SCHED_FIFO);
     EXPECT_EQ(state.priority, 10);
   } else {
-    EXPECT_THROW(capa::detail::apply(opts), std::system_error);
+    EXPECT_EQ(kind_of(capa::detail::apply(opts)), capa::ErrorKind::System);
     EXPECT_NE(capa::current().policy, SCHED_FIFO);
   }
 }
@@ -123,22 +125,22 @@ TEST(Rt, RefusedApplyRollsBackAffinity)
   opts.cpus = {before.cpus.front()};
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict == capa::Verdict::Ok) {
-    capa::detail::apply(opts);
+    must(capa::detail::apply(opts));
     EXPECT_EQ(capa::current().policy, SCHED_FIFO);
     EXPECT_EQ(capa::current().cpus, opts.cpus);
   } else {
-    EXPECT_THROW(capa::detail::apply(opts), std::system_error);
+    EXPECT_EQ(kind_of(capa::detail::apply(opts)), capa::ErrorKind::System);
     EXPECT_EQ(capa::current().cpus, before.cpus);
   }
 }
 
 TEST(Rt, PreflightAlwaysReportsHostFindings)
 {
-  const auto rep = capa::preflight(capa::Options{});
+  const auto rep = must(capa::preflight(capa::Options{}));
   EXPECT_NE(rep.find("kernel-preemption"), nullptr);
   EXPECT_NE(rep.find("memory-lock"), nullptr);
   EXPECT_EQ(rep.find("policy-permission"), nullptr);
@@ -152,7 +154,7 @@ TEST(Rt, PreflightChecksRequestSpecificItems)
   opts.policy = capa::Policy::Fifo;
   opts.priority = 20;
   opts.cpus = {0};
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   for (const char * id :
        {"policy-permission", "rt-throttle", "cpu-online", "cpu-isolation", "cpu-governor"}) {
     EXPECT_NE(rep.find(id), nullptr) << id;
@@ -166,14 +168,14 @@ TEST(Rt, PreflightRejectsTransportAtOrAboveControl)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 80;
-  const auto above = capa::preflight(opts, /*control_priority=*/50);
+  const auto above = must(capa::preflight(opts, /*control_priority=*/50));
   const auto * order = above.find("priority-order");
   ASSERT_NE(order, nullptr);
   EXPECT_EQ(order->verdict, capa::Verdict::Fail);
   EXPECT_FALSE(above.ok());
 
   opts.priority = 30;
-  const auto below = capa::preflight(opts, /*control_priority=*/50);
+  const auto below = must(capa::preflight(opts, /*control_priority=*/50));
   ASSERT_NE(below.find("priority-order"), nullptr);
   EXPECT_EQ(below.find("priority-order")->verdict, capa::Verdict::Ok);
 }
@@ -185,7 +187,7 @@ TEST(Rt, PreflightFailsOfflineCpu)
   }
   capa::Options opts;
   opts.cpus = {1023};
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * online = rep.find("cpu-online");
   ASSERT_NE(online, nullptr);
   EXPECT_EQ(online->verdict, capa::Verdict::Fail);
@@ -200,7 +202,7 @@ TEST(Rt, UndeclaredControlPriorityIsReportedNotSkipped)
   opts.policy = capa::Policy::Fifo;
   opts.priority = 80;
 
-  const auto rep = capa::preflight(opts);  // control_priority left undeclared
+  const auto rep = must(capa::preflight(opts));  // control_priority left undeclared
   const auto * order = rep.find("priority-order");
   ASSERT_NE(order, nullptr) << "the ordering check vanished instead of reporting itself";
   EXPECT_EQ(order->verdict, capa::Verdict::Unknown)
@@ -212,7 +214,7 @@ TEST(Rt, ApplyCheckedIsANoOpForOptionsThatAskNothing)
 {
   RestoreThread restore;
   const auto before = capa::current();
-  const auto rep = capa::apply_checked(capa::Options{}, capa::Strictness::Hard);
+  const auto rep = must(capa::apply_checked(capa::Options{}, capa::Strictness::Hard));
   EXPECT_TRUE(rep.findings.empty()) << "an empty request has no host to judge";
   const auto after = capa::current();
   EXPECT_EQ(after.policy, before.policy);
@@ -229,7 +231,7 @@ TEST(Rt, ApplyCheckedRefusesWhatPreflightFails)
   opts.cpus = {1023};  // offline: preflight Fails on cpu-online
   const auto before = capa::current();
 
-  EXPECT_THROW(capa::apply_checked(opts, capa::Strictness::Soft), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::apply_checked(opts, capa::Strictness::Soft)), capa::ErrorKind::Failed);
 
   const auto after = capa::current();
   EXPECT_EQ(after.cpus, before.cpus) << "a refused apply_checked must not have touched the thread";
@@ -242,7 +244,7 @@ TEST(Rt, HardRefusesTheWarnsSoftTolerates)
   // yields Warns. Strictness is the only thing that separates the two readings of them.
   capa::Options opts;
   opts.cpus = {0};
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   if (!rep.ok()) {
     GTEST_SKIP()
       << "capa-cap:rt-warn-verdict this host Fails before Warn strictness can be observed";
@@ -259,8 +261,8 @@ TEST(Rt, HardRefusesTheWarnsSoftTolerates)
       << "capa-cap:rt-warn-verdict this host is fully configured for RT; no Warn to strengthen";
   }
 
-  EXPECT_NO_THROW(capa::apply_checked(opts, capa::Strictness::Soft));
-  EXPECT_THROW(capa::apply_checked(opts, capa::Strictness::Hard), std::runtime_error);
+  EXPECT_TRUE((capa::apply_checked(opts, capa::Strictness::Soft)).ok());
+  EXPECT_EQ(kind_of(capa::apply_checked(opts, capa::Strictness::Hard)), capa::ErrorKind::Failed);
 }
 
 TEST(Rt, PreflightJudgesAllFourIsolationAxes)
@@ -271,7 +273,7 @@ TEST(Rt, PreflightJudgesAllFourIsolationAxes)
   // to refuse.
   capa::Options opts;
   opts.cpus = {0};
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
 
   for (const char * id : {"cpu-isolation", "rcu-offload", "irq-affinity"}) {
     const auto * f = rep.find(id);
@@ -288,7 +290,7 @@ TEST(Rt, IsolationAxesAreNotJudgedWithoutARequestedCpu)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
 
   EXPECT_EQ(rep.find("rcu-offload"), nullptr);
   EXPECT_EQ(rep.find("irq-affinity"), nullptr);
@@ -304,7 +306,7 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 12;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
 
@@ -314,7 +316,7 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
   capa::ThreadState self_view;
   std::thread child([&] {
     if (perm->verdict == capa::Verdict::Ok) {
-      capa::detail::apply(opts);
+      must(capa::detail::apply(opts));
     }
     self_view = capa::current();
     child_tid.store(capa::this_tid());
@@ -329,7 +331,7 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
 
   const int tid = child_tid.load();
   EXPECT_NE(tid, capa::this_tid()) << "this_tid returned the same id on two threads";
-  const capa::ThreadState outside_view = capa::observe(tid);
+  const capa::ThreadState outside_view = must(capa::observe(tid));
   stop.store(true);
   child.join();
 
@@ -350,15 +352,15 @@ TEST(Rt, ObserveAnswersAboutTheThreadItWasHanded)
 // "this stage never started" into "this stage is fine".
 TEST(Rt, ObserveRefusesWhatItCannotRead)
 {
-  EXPECT_THROW(capa::observe(0), std::invalid_argument);
-  EXPECT_THROW(capa::observe(-1), std::invalid_argument);
+  EXPECT_EQ(kind_of(capa::observe(0)), capa::ErrorKind::InvalidArgument);
+  EXPECT_EQ(kind_of(capa::observe(-1)), capa::ErrorKind::InvalidArgument);
 
   std::ifstream f("/proc/sys/kernel/pid_max");
   int pid_max = 0;
   ASSERT_TRUE(f >> pid_max) << "cannot read pid_max";
   // Above the wrap point, so it names no thread now and cannot be allocated later either --
   // unlike the tid of a thread this test just joined, which the kernel is free to hand out again.
-  EXPECT_THROW(capa::observe(pid_max + 1), std::system_error);
+  EXPECT_EQ(kind_of(capa::observe(pid_max + 1)), capa::ErrorKind::System);
 }
 
 // Refuses a vacuous pass. Every test above holds on both sides of the permission branch, so this
@@ -372,7 +374,7 @@ TEST(Rt, PrivilegedPathIsExercisedWhereDeclared)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   const bool privileged = perm->verdict == capa::Verdict::Ok;
@@ -394,10 +396,10 @@ TEST(Rt, ValidateRejectsInheritedChildrenWithoutAnRtPolicy)
 {
   capa::Options opts;
   opts.children = capa::Children::Inherit;
-  EXPECT_THROW(opts.validate(), std::invalid_argument) << "nothing RT to pass on";
+  EXPECT_EQ(kind_of(opts.validate()), capa::ErrorKind::InvalidArgument) << "nothing RT to pass on";
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  EXPECT_NO_THROW(opts.validate());
+  EXPECT_TRUE((opts.validate()).ok());
 }
 
 // Linux hands a child its parent's policy by default, pthreads included. Reset must reach a
@@ -408,7 +410,7 @@ TEST(Rt, ChildrenFollowTheDeclaredPolicy)
   capa::Options opts;
   opts.policy = capa::Policy::Fifo;
   opts.priority = 10;
-  const auto rep = capa::preflight(opts);
+  const auto rep = must(capa::preflight(opts));
   const auto * perm = rep.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict != capa::Verdict::Ok) {
@@ -420,7 +422,7 @@ TEST(Rt, ChildrenFollowTheDeclaredPolicy)
     capa::ThreadState child;
     std::thread outer([&] {
       opts.children = children;
-      capa::apply_checked(opts, capa::Strictness::Soft);
+      must(capa::apply_checked(opts, capa::Strictness::Soft));
       parent = capa::current();
       std::thread inner([&] { child = capa::current(); });
       inner.join();
@@ -455,7 +457,7 @@ TEST(Preflight, MemoryLockIsJudgedOnTheTargetsProcess)
     // A sanitizer build intercepts mlock and locks nothing, so the kernel's count decides.
     const bool locked =
       ::mlock(page, sizeof page) == 0 &&
-      capa::detail::preflight_to(0, o, 0).find("memory-lock")->verdict == capa::Verdict::Ok;
+      must(capa::detail::preflight_to(0, o, 0)).find("memory-lock")->verdict == capa::Verdict::Ok;
     const char c = locked ? 'y' : 'n';
     if (::write(fds[1], &c, 1) != 1) {
       ::_exit(1);
@@ -468,20 +470,38 @@ TEST(Preflight, MemoryLockIsJudgedOnTheTargetsProcess)
   char c = 0;
   ASSERT_EQ(::read(fds[0], &c, 1), 1);
   ::close(fds[0]);
-  const capa::Report theirs = capa::detail::preflight_to(pid, o, 0);
+  const capa::Report theirs = must(capa::detail::preflight_to(pid, o, 0));
   ::kill(pid, SIGKILL);
   ::waitpid(pid, nullptr, 0);
   if (c != 'y') {
     GTEST_SKIP() << "capa-cap:memlock no page could be locked (host limit or sanitizer)";
   }
 
-  const capa::Report mine = capa::preflight(o);
+  const capa::Report mine = must(capa::preflight(o));
   ASSERT_NE(theirs.find("memory-lock"), nullptr) << theirs.to_string();
   EXPECT_EQ(theirs.find("memory-lock")->verdict, capa::Verdict::Ok) << theirs.to_string();
   EXPECT_EQ(mine.find("memory-lock")->verdict, capa::Verdict::Warn)
     << "this test process locks no memory, so its own verdict must differ";
 
-  const capa::Report kthread = capa::detail::preflight_to(2, o, 0);  // kthreadd
+  const capa::Report kthread = must(capa::detail::preflight_to(2, o, 0));  // kthreadd
   ASSERT_NE(kthread.find("memory-lock"), nullptr);
   EXPECT_EQ(kthread.find("memory-lock")->verdict, capa::Verdict::Ok) << kthread.to_string();
+}
+
+TEST(Result, UnwrapRaisesTheExceptionItsCallersKnow)
+{
+  using capa::detail::unwrap;
+  EXPECT_THROW(
+    unwrap(capa::Result<void>(capa::Error{capa::ErrorKind::InvalidArgument, "x"})),
+    std::invalid_argument);
+  EXPECT_THROW(
+    unwrap(capa::Result<int>(capa::Error{capa::ErrorKind::Failed, "x"})), std::runtime_error);
+  try {
+    unwrap(capa::Result<void>(capa::Error{capa::ErrorKind::System, "kernel said no", EPERM}));
+    ADD_FAILURE() << "no exception";
+  } catch (const capa::detail::SystemFailure & e) {
+    EXPECT_EQ(e.code(), EPERM);
+    EXPECT_STREQ(e.what(), "kernel said no");
+  }
+  EXPECT_EQ(unwrap(capa::Result<int>(7)), 7);
 }

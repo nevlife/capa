@@ -71,9 +71,20 @@ auto main(int argc, char ** argv) -> int
 
     // The whole schedule of this thread is in the file CAPA_SPEC names; the code only says which
     // stage the group is. Unset, this registers nothing.
-    capa::flux::bind(ex, *node, node->group(), StageNode::kGroupLabel);
+    if (const auto bound = capa::flux::bind(ex, *node, node->group(), StageNode::kGroupLabel);
+        !bound) {
+      std::fprintf(stderr, "chain: %s\n", bound.error().what.c_str());
+      rclcpp::shutdown();
+      return 1;
+    }
 
-    const capa::Spec spec = capa::Spec::load();
+    const auto loaded = capa::Spec::load();
+    if (!loaded) {
+      std::fprintf(stderr, "chain: %s\n", loaded.error().what.c_str());
+      rclcpp::shutdown();
+      return 1;
+    }
+    const capa::Spec & spec = *loaded;
     if (spec.empty()) {
       RCLCPP_WARN(node->get_logger(), "CAPA_SPEC is unset: running with no declared schedule");
     }

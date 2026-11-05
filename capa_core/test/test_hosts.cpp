@@ -1,4 +1,5 @@
 #include "capa/spec.hpp"
+#include "result_test_util.hpp"
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -53,14 +54,14 @@ public:
     const capa::Options & opts, int control = 0,
     capa::Strictness strict = capa::Strictness::Soft) const -> capa::Report
   {
-    return capa::detail::preflight_at(root_, 0, opts, control, strict);
+    return must(capa::detail::preflight_at(root_, 0, opts, control, strict));
   }
 
   [[nodiscard]] auto preflight(const std::string & yaml) const -> capa::Report
   {
     const std::string file = root_ + "/chain.yaml";
     std::ofstream(file) << yaml;
-    return capa::detail::preflight_at(root_, capa::Spec::load(file));
+    return capa::detail::preflight_at(root_, must(capa::Spec::load(file)));
   }
 
 private:

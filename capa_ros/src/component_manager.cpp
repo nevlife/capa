@@ -5,7 +5,6 @@
 #include <rclcpp/logging.hpp>
 
 #include <algorithm>
-#include <exception>
 #include <stdexcept>
 #include <utility>
 
@@ -13,14 +12,14 @@ namespace capa
 {
 
 ComponentManager::ComponentManager(std::string node_name)
-: ::flux::ComponentManager(std::move(node_name)), spec_(Spec::load())
+: ::flux::ComponentManager(std::move(node_name)), spec_(detail::unwrap(Spec::load()))
 {
   if (spec_.empty()) {
     RCLCPP_INFO(get_logger(), "capa: CAPA_SPEC is not set; no group is bound");
   }
 }
 
-// Spec::declared() throws when a group or a stage is named twice, which refuses the load.
+// A group or a stage named twice refuses the load: a hook tells flux so by throwing.
 void ComponentManager::on_node_added(const NodeBase::SharedPtr & node)
 {
   if (spec_.empty()) {
@@ -38,17 +37,16 @@ void ComponentManager::on_thread_start(
   if (spec_.empty()) {
     return;
   }
-  const Stage * stage = flux::declared(spec_, *node, group);
+  const Stage * stage = detail::unwrap(flux::declared(spec_, *node, group));
   if (stage == nullptr) {
     return;
   }
   const std::string name = detail::stage_name(*stage);
-  Report rep;
-  try {
-    rep = apply_checked(*stage);
-  } catch (const std::exception & e) {
-    throw std::runtime_error("capa: stage " + name + ": " + e.what());
+  auto applied = apply_checked(*stage);
+  if (!applied) {
+    throw std::runtime_error("capa: stage " + name + ": " + applied.error().what);
   }
+  const Report rep = *std::move(applied);
   std::string warned;
   for (const auto & f : rep.findings) {
     if (f.verdict == Verdict::Warn) {
@@ -67,7 +65,7 @@ std::vector<std::string> unbound_stages(
 {
   const std::string fqn = node.get_fully_qualified_name();
   std::vector<const Stage *> bound;
-  for (const auto & entry : flux::detail::declared_groups(spec, node)) {
+  for (const auto & entry : detail::unwrap(flux::detail::declared_groups(spec, node))) {
     bound.push_back(entry.second);
   }
   std::vector<std::string> out;

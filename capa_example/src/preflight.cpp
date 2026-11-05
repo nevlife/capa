@@ -13,7 +13,11 @@ auto main() -> int
   opts.cpus = {2};
 
   const int control_priority = 90;
-  const capa::Report report = capa::preflight(opts, control_priority);
-  std::printf("%s\n", report.to_string().c_str());
-  return report.ok() ? EXIT_SUCCESS : EXIT_FAILURE;
+  const auto report = capa::preflight(opts, control_priority);
+  if (!report) {
+    std::fprintf(stderr, "%s\n", report.error().what.c_str());
+    return EXIT_FAILURE;
+  }
+  std::printf("%s\n", report->to_string().c_str());
+  return report->ok() ? EXIT_SUCCESS : EXIT_FAILURE;
 }

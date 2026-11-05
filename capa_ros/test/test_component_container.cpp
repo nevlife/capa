@@ -1,3 +1,4 @@
+#include "../../capa_core/test/result_test_util.hpp"
 #include "capa/flux.hpp"
 #include "component_manager.hpp"
 
@@ -254,7 +255,7 @@ TEST_F(Container, ARefusedStageStopsTheContainer)
   capa::Options fifo;
   fifo.policy = capa::Policy::Fifo;
   fifo.priority = 10;
-  if (capa::preflight(fifo).ok()) {
+  if (must(capa::preflight(fifo)).ok()) {
     GTEST_SKIP() << "capa-cap:rtprio this host grants SCHED_FIFO, so nothing refuses the stage";
   }
   start(

@@ -1,14 +1,15 @@
 #ifndef CAPA_SPEC_HPP
 #define CAPA_SPEC_HPP
 
+#include "capa/result.hpp"
 #include "capa/rt.hpp"
 
 #include <chrono>
 #include <cstddef>
-#include <exception>
 #include <future>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -78,7 +79,7 @@ namespace detail
 {
 // How messages spell a stage: `node`, `node/group`, or `name`.
 auto stage_name(const Stage & stage) -> std::string;
-void reject_external(const Stage & stage, const char * caller);
+auto reject_external(const Stage & stage, const char * caller) -> Result<void>;
 // Each chain's stages, as indices into stages(), in flow order.
 auto chains(const Spec & spec) -> const std::vector<std::vector<std::size_t>> &;
 }  // namespace detail
@@ -88,15 +89,16 @@ class Spec
 public:
   Spec() = default;
 
-  static auto load(const std::string & path) -> Spec;
+  static auto load(const std::string & path) -> Result<Spec>;
 
-  static auto load() -> Spec;
+  static auto load() -> Result<Spec>;
 
   [[nodiscard]] auto empty() const noexcept -> bool { return stages_.empty(); }
   [[nodiscard]] auto stages() const noexcept -> const std::vector<Stage> & { return stages_; }
 
+  // Never nullptr; a stage the file does not name is an error. find() is the one that may miss.
   [[nodiscard]] auto stage(const std::string & target, const std::string & group = "") const
-    -> const Stage &;
+    -> Result<const Stage *>;
 
   [[nodiscard]] auto find(const std::string & target, const std::string & group = "") const noexcept
     -> const Stage *;
@@ -106,9 +108,9 @@ public:
   // For each of `groups`, every callback group of `node`, the stage the file declares for it, or
   // nullptr: a stage with no group for the default one, a `holds` stage for the group that holds
   // its subscription or service. A stage named by label alone, an external one and a matched one
-  // are not resolved here. Throws when one group is claimed twice or one stage by two groups.
+  // are not resolved here. An error when one group is claimed twice or one stage by two groups.
   [[nodiscard]] auto declared(const std::string & node, const std::vector<GroupContent> & groups)
-    const -> std::vector<const Stage *>;
+    const -> Result<std::vector<const Stage *>>;
 
 private:
   friend auto detail::chains(const Spec & spec) -> const std::vector<std::vector<std::size_t>> &;
@@ -117,36 +119,38 @@ private:
 };
 
 // Takes the stage whole: unpacking it into Options would drop the chain's strictness.
-auto apply_checked(const Stage & stage) -> Report;
+auto apply_checked(const Stage & stage) -> Result<Report>;
 
-auto bind(const std::string & target, const std::string & group = "") -> Report;
+auto bind(const std::string & target, const std::string & group = "") -> Result<Report>;
 
 // bind() for a caller that binds every thread it starts: nullopt, and nothing applied, when the
 // file declares no stage there that a thread binds itself (none, external, or matched).
 auto bind_declared(const std::string & target, const std::string & group = "")
-  -> std::optional<Report>;
+  -> Result<std::optional<Report>>;
 
 template <class F>
-auto spawn(const std::string & target, const std::string & group, F && fn) -> std::thread
+auto spawn(const std::string & target, const std::string & group, F && fn) -> Result<std::thread>
 {
-  std::promise<void> ready;
+  std::promise<Result<void>> ready;
   auto bound = ready.get_future();
-  // Owned by the thread: the caller may return and drop its future while set_value still runs.
-  std::thread t([ready = std::move(ready), target, group, fn = std::forward<F>(fn)]() mutable {
-    try {
-      bind(target, group);
-    } catch (...) {
-      ready.set_exception(std::current_exception());
-      return;
-    }
-    ready.set_value();
-    fn();
-  });
+  std::thread t;
   try {
-    bound.get();
-  } catch (...) {
+    // Owned by the thread: the caller may return and drop its future while set_value still runs.
+    t = std::thread([ready = std::move(ready), target, group, fn = std::forward<F>(fn)]() mutable {
+      auto r = bind(target, group);
+      const bool ok = r.ok();
+      ready.set_value(ok ? Result<void>{} : Result<void>{r.error()});
+      if (ok) {
+        fn();
+      }
+    });
+  } catch (const std::system_error & e) {
+    return Error{ErrorKind::System, e.what(), e.code().value()};
+  }
+  auto r = bound.get();
+  if (!r) {
     t.join();
-    throw;
+    return r.error();
   }
   return t;
 }
@@ -161,7 +165,7 @@ auto verify(const Stage & stage, int tid, std::chrono::milliseconds window = {})
 
 auto verify_process(const Spec & spec) -> Report;
 
-auto verify_process(const Spec & spec, int pid) -> Report;
+auto verify_process(const Spec & spec, int pid) -> Result<Report>;
 
 struct Binding
 {
@@ -195,9 +199,9 @@ auto preflight_at(const std::string & root, const Spec & spec) -> Report;
 // The findings verify() reads from /proc about thread `tid` in state `st`, under `root`.
 auto verify_now_at(const std::string & root, int tid, const ThreadState & st) -> Report;
 
-// CAPA_DAEMON_DIR (default /run/capa), created if missing. Throws std::runtime_error when it is
-// not this user's or others can write it.
-auto daemon_dir() -> std::string;
+// CAPA_DAEMON_DIR (default /run/capa), created if missing. An error when it is not this user's or
+// others can write it.
+auto daemon_dir() -> Result<std::string>;
 // /proc/<pid>/task/<tid>/stat field 22, 0 when unreadable. Tells a thread from its tid's reuse.
 auto task_starttime(int pid, int tid) -> std::uint64_t;
 }  // namespace detail

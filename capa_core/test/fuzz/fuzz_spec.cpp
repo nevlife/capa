@@ -24,16 +24,16 @@ extern "C" auto LLVMFuzzerTestOneInput(const std::uint8_t * data, std::size_t si
   }
   const std::string path = "/proc/self/fd/" + std::to_string(fd);
 
-  try {
-    const capa::Spec spec = capa::Spec::load(path);
-    for (const capa::Stage & st : spec.stages()) {
+  // An exception out of load() is the finding: a bad file is a returned error.
+  const auto spec = capa::Spec::load(path);
+  if (spec) {
+    for (const capa::Stage & st : spec->stages()) {
       const std::string & target = st.name.empty() ? st.node : st.name;
-      if (spec.find(target, st.group) == nullptr) {
+      if (spec->find(target, st.group) == nullptr) {
         std::abort();  // every stage is found by its name
       }
     }
-    (void)spec.external();
-  } catch (const std::runtime_error &) {
+    (void)spec->external();
   }
   ::close(fd);
   return 0;

@@ -10,6 +10,8 @@ capa는 데이터가 지나가는 경로에 있는 스레드에 OS 스케줄링(
 
 C++와 Python은 이름, 인자 순서, 기본값이 같다. 다른 곳은 언어 때문에 달라질 수밖에 없는 곳뿐이고, 7절에 모았다.
 
+C++ 함수는 실패를 반환값으로 알린다. 실패할 수 있는 함수는 `capa::Result<T>`(`capa/result.hpp`)를 돌려준다. 값은 `*`나 `->`로 읽고, 읽기 전에 `if (r)`이나 `r.ok()`로 확인한다. 실패한 `Result`의 값을 읽으면 동작이 정의되지 않는다. 실패의 내용은 `r.error()`의 `capa::Error`(`kind`, `what`, `code`)다. 같은 실패가 Python에서는 예외다(6절). 이 문서에서 "거절한다"는 C++에서는 실패한 `Result`를, Python에서는 예외를 뜻한다.
+
 ## 1. 스레드마다 한 줄
 
 체인의 모든 stage와 그 스케줄은 파일에 적는다. `CAPA_SPEC`이 그 파일을 가리킨다.
@@ -34,12 +36,12 @@ chains:
 | 컴포넌트 노드의 그룹 스레드 | 코드 없음. `capa_component_container`가 건다(5절) | - |
 
 - `bind(target, group="")`는 호출한 스레드를 그 stage에 건다. 걸기 전에 호스트를 판정하고, 건 뒤에 커널에서 값을 되읽는다. ROS 스레드면 `target`은 노드의 전체 이름(`get_fully_qualified_name()`)이고 `group`은 그룹 라벨이다. `name` stage면 `target`에 그 이름을 주고 그룹은 주지 않는다.
-- `spawn(target, group, fn)`은 스레드를 만들어 bind하고 그 뒤에 `fn`을 돌린다. 스레드가 걸린 뒤에 반환한다. bind가 거절되면 `fn`은 돌지 않고 거절이 호출자에게 던져진다. 새 스레드 안에서 `bind`를 부르는 것보다 이것을 쓴다. 그렇게 하면 스레드는 `bind` 줄에 닿을 때까지 스케줄 없이 돈다.
-- `capa::flux::bind(ex, node, group, label="")`는 executor에 bind를 등록한다. `group`을 맡은 자식 스레드가 첫 콜백 전에 그 stage를 자기에게 건다. 거절되면 `spin()`이 에러를 낸다. stage는 호출할 때 찾으므로, 라벨에 오타가 있으면 그 자리에서 예외를 던진다.
-- 프로세스에 RT 권한이 없어 판정이 `policy-permission` 하나로만 막히면, 셋 다 capad에 맡긴다. 기록에 요청을 남기고, 스레드가 선언대로 돌 때까지 5초까지 기다린다. capad가 걸면 `policy-permission`은 Ok로 바뀐다. 5초 안에 걸리지 않으면 chain의 target과 관계없이 예외를 던진다. 스레드를 파일과 다른 우선순위로 돌게 두지 않기 때문이다. capad는 체인 파일에 선언된 값만 건다.
+- `spawn(target, group, fn)`은 스레드를 만들어 bind하고 그 뒤에 `fn`을 돌린다. 스레드가 걸린 뒤에 반환한다. bind가 거절되면 `fn`은 돌지 않고 호출자가 거절을 받는다. 새 스레드 안에서 `bind`를 부르는 것보다 이것을 쓴다. 그렇게 하면 스레드는 `bind` 줄에 닿을 때까지 스케줄 없이 돈다.
+- `capa::flux::bind(ex, node, group, label="")`는 executor에 bind를 등록한다. `group`을 맡은 자식 스레드가 첫 콜백 전에 그 stage를 자기에게 건다. 거절되면 `spin()`이 예외로 끝난다. flux가 hook의 실패를 예외로 받기 때문이다. stage는 호출할 때 찾으므로, 라벨에 오타가 있으면 그 자리에서 거절한다.
+- 프로세스에 RT 권한이 없어 판정이 `policy-permission` 하나로만 막히면, 셋 다 capad에 맡긴다. 기록에 요청을 남기고, 스레드가 선언대로 돌 때까지 5초까지 기다린다. capad가 걸면 `policy-permission`은 Ok로 바뀐다. 5초 안에 걸리지 않으면 chain의 target과 관계없이 거절한다. 스레드를 파일과 다른 우선순위로 돌게 두지 않기 때문이다. capad는 체인 파일에 선언된 값만 건다.
 - `CAPA_SPEC`이 없으면 셋 다 아무것도 하지 않는다. `bind`는 빈 report를 돌려준다. `spawn`은 `fn`만 돌린다. `flux::bind`는 아무것도 등록하지 않는다.
-- 파일에 없는 라벨을 주면 예외를 던진다. 아무것도 걸지 않고 넘어가면 오타를 알아챌 수 없기 때문이다.
-- `bind_declared(target, group="")`는 파일이 그 stage를 선언했을 때만 `bind`한다. stage가 선언되지 않았을 때, external일 때, `match`가 있을 때는 아무것도 걸지 않고 `std::nullopt`(Python은 `None`)를 돌려준다. 이 함수는 자기가 만드는 스레드마다 이것을 부르는 컨테이너를 위한 것이다. 라벨을 아는 코드는 `bind`를 쓴다. 그래야 라벨의 오타가 예외로 드러난다.
+- 파일에 없는 라벨을 주면 거절한다. 아무것도 걸지 않고 넘어가면 오타를 알아챌 수 없기 때문이다.
+- `bind_declared(target, group="")`는 파일이 그 stage를 선언했을 때만 `bind`한다. stage가 선언되지 않았을 때, external일 때, `match`가 있을 때는 아무것도 걸지 않고 `std::nullopt`(Python은 `None`)를 돌려준다. 이 함수는 자기가 만드는 스레드마다 이것을 부르는 컨테이너를 위한 것이다. 라벨을 아는 코드는 `bind`를 쓴다. 그래야 라벨의 오타가 거절로 드러난다.
 
 ## 2. 체인 파일
 
@@ -101,8 +103,8 @@ capa는 파일을 읽을 때 아래 규칙을 검사하고, 규칙을 어긴 sta
 - "CPU를 공유할 수 있다"는 `cpus`가 겹친다는 뜻이다. `cpus`가 없는 stage와 external stage는 어디에나 올 수 있으므로 모든 CPU를 공유한다.
 - RT가 아닌 stage(`policy: other`, `inherit`, `expect_priority: 0`인 external)는 어떤 규칙에도 들어가지 않는다.
 - 모르는 키는 거절한다. 버전 필드는 없다. 버전 번호는 스키마가 바뀌었다는 것을 알릴 뿐, `priorty` 같은 오타는 잡지 못한다.
-- `capa::Spec::load(path)`는 파일을, `capa::Spec::load()`는 `CAPA_SPEC`을 읽는다. 변수가 없으면 빈 spec이고 `empty()`가 참이다. `stages()`는 stage 전부를 준다. `find(target, group)`는 하나를 주고, 없으면 null이다. `stage(target, group)`는 하나를 주고, 없으면 예외를 던진다. `external()`은 external stage만 준다.
-- `declared(node, groups)`는 노드의 콜백 그룹 전부를 `GroupContent`(`is_default`, `subscriptions`, `services`)의 목록으로 받아, 그룹마다 파일이 선언한 stage나 null을 준다. 그룹 없는 stage는 기본 그룹의 것이고, `holds` stage는 그것이 가리키는 구독이나 서비스를 가진 그룹의 것이다. 라벨만 있는 stage, external stage, `match` stage는 여기서 찾지 않는다. 한 그룹을 두 stage가 가리키거나, 한 stage가 가리키는 것을 두 그룹이 가지면 추측하지 않고 예외를 던진다.
+- `capa::Spec::load(path)`는 파일을, `capa::Spec::load()`는 `CAPA_SPEC`을 읽는다. 변수가 없으면 빈 spec이고 `empty()`가 참이다. `stages()`는 stage 전부를 준다. `find(target, group)`는 하나를 주고, 없으면 null이다. `stage(target, group)`는 하나의 포인터를 `Result`로 주고, 없으면 거절한다. `external()`은 external stage만 준다.
+- `declared(node, groups)`는 노드의 콜백 그룹 전부를 `GroupContent`(`is_default`, `subscriptions`, `services`)의 목록으로 받아, 그룹마다 파일이 선언한 stage나 null을 준다. 그룹 없는 stage는 기본 그룹의 것이고, `holds` stage는 그것이 가리키는 구독이나 서비스를 가진 그룹의 것이다. 라벨만 있는 stage, external stage, `match` stage는 여기서 찾지 않는다. 한 그룹을 두 stage가 가리키거나, 한 stage가 가리키는 것을 두 그룹이 가지면 추측하지 않고 거절한다.
 - `capa::Stage`는 `match`(`irq`, `process`, `arg`, `thread`, `empty()`를 가진 `Match`), `holds`(`subscription`, `service`, `empty()`를 가진 `Holds`), `children_cpus`, `node`, `group`, `name`, `kind`(`Kind::Worker` 또는 `Kind::Release`), `external`, `expect_priority`, `opts`, `strict`, `chain`(처음 선언한 체인)을 담는다.
 
 ## 3. 적용
@@ -118,18 +120,27 @@ o.priority = 70;                     // Fifo/RoundRobin이면 1..99, 아니면 0
 o.cpus = {3};                        // 비우면 affinity를 안 건드린다
 o.children = capa::Children::Reset;  // Reset / Inherit
 
-capa::Report rep = capa::apply_checked(o, capa::Strictness::Hard, /*control_priority=*/80);
-rep = capa::apply_checked(spec.stage("/perception_node", "infer"));  // Spec의 stage
-rep = capa::bind("/perception_node", "infer");                       // CAPA_SPEC의 stage
+// 모든 호출이 capa::Result를 돌려준다. 확인한 뒤 * 나 -> 로 값을 읽는다
+capa::Result<capa::Report> rep =
+  capa::apply_checked(o, capa::Strictness::Hard, /*control_priority=*/80);
+if (!rep) {
+  std::fprintf(stderr, "%s\n", rep.error().what.c_str());
+  return;
+}
+capa::Result<const capa::Stage *> stage = spec.stage("/perception_node", "infer");
+if (stage) {
+  rep = capa::apply_checked(**stage);  // Spec의 stage
+}
+rep = capa::bind("/perception_node", "infer");  // CAPA_SPEC의 stage
 ```
 
-- `apply_checked(opts, strict=Soft, control_priority=0)`는 `preflight`를 먼저 돌린다. 판정이 적용을 막으면 스레드를 건드리기 전에 `std::runtime_error`를 던진다. 통과하면 스레드를 걸고 커널에서 되읽는다. 되읽은 policy와 priority는 요청과 같아야 하고, 스레드의 CPU는 요청한 CPU 안에 있어야 한다(cpuset이 마스크를 좁힐 수 있다). 어긋나면 예외를 던진다. 이때 스레드는 이미 바뀐 상태다.
+- `apply_checked(opts, strict=Soft, control_priority=0)`는 `preflight`를 먼저 돌린다. 판정이 적용을 막으면 스레드를 건드리기 전에 `ErrorKind::Failed`로 거절한다. 통과하면 스레드를 걸고 커널에서 되읽는다. 되읽은 policy와 priority는 요청과 같아야 하고, 스레드의 CPU는 요청한 CPU 안에 있어야 한다(cpuset이 마스크를 좁힐 수 있다). 어긋나면 거절한다. 이때 스레드는 이미 바뀐 상태다.
 - `Strictness`는 `Warn`을 어떻게 다룰지 정한다. `Soft`면 Warn을 report로 돌려주고, `Hard`면 거절한다. `Fail`은 둘 다 거절한다.
 - `apply_checked(stage)`와 `bind`는 stage를 통째로 받으므로 체인의 strictness도 함께 받는다. 이때 report의 `priority-order`는 Ok다. 순서는 파일을 읽을 때 이미 검사했기 때문이다.
-- 한 stage에는 스레드 하나만 건다. 이 프로세스의 살아 있는 스레드가 stage를 쥐고 있을 때 다른 스레드가 같은 stage를 걸면 `std::invalid_argument`를 던진다. 쥔 스레드가 다시 거는 것은 허용한다. 쥔 스레드가 끝나면 stage가 풀린다.
+- 한 stage에는 스레드 하나만 건다. 이 프로세스의 살아 있는 스레드가 stage를 쥐고 있을 때 다른 스레드가 같은 stage를 걸면 `ErrorKind::InvalidArgument`로 거절한다. 쥔 스레드가 다시 거는 것은 허용한다. 쥔 스레드가 끝나면 stage가 풀린다.
 - 아무것도 요청하지 않는 `Options`는 판정까지 포함해 아무것도 하지 않고 빈 report를 돌려준다.
 - `Options::validate()`는 다르게 해석될 수 있는 요청을 거절한다. 거절하는 요청은 priority 1..99 없이 RT 정책만 준 것, RT 정책 없이 priority를 준 것, RT 정책 없이 `children = Inherit`을 준 것, 커널의 CPU 집합 크기를 넘는 CPU 번호다.
-- 커널이 거절하면 `std::system_error`를 던진다. 요청보다 낮은 설정으로 몰래 바꿔 적용하지 않는다.
+- 커널이 거절하면 `ErrorKind::System`으로 거절하고, `code`에 errno를 담는다. 요청보다 낮은 설정으로 몰래 바꿔 적용하지 않는다.
 
 ### 자식
 
@@ -148,13 +159,13 @@ Linux는 새 스레드에 부모의 정책, 우선순위, CPU를 준다. `fork()
 ## 4. 확인
 
 ```cpp doc:check
-capa::Report host = capa::preflight(o, /*control_priority=*/80);  // 판정만, 변경 없음
-capa::ThreadState self = capa::current();                          // 이 스레드, 커널에서
-int tid = capa::this_tid();                                        // 이 스레드의 커널 id
-capa::ThreadState other = capa::observe(tid);                      // 아무 스레드, 프로세스 무관
-capa::Report drift = capa::verify(stage, tid);                     // 스레드와 stage 대조
-capa::Report stray = capa::verify_process(spec);                   // 설명되지 않는 RT 스레드
-capa::Report whole = capa::preflight(spec);                        // 파일 전체를 이 호스트에서
+capa::Result<capa::Report> host = capa::preflight(o, /*control_priority=*/80);  // 판정만
+capa::ThreadState self = capa::current();                       // 이 스레드, 커널에서
+int tid = capa::this_tid();                                     // 이 스레드의 커널 id
+capa::Result<capa::ThreadState> other = capa::observe(tid);     // 아무 스레드, 프로세스 무관
+capa::Report drift = capa::verify(stage, tid);                  // 스레드와 stage 대조
+capa::Report stray = capa::verify_process(spec);                // 설명되지 않는 RT 스레드
+capa::Report whole = capa::preflight(spec);                     // 파일 전체를 이 호스트에서
 capa::Report spent = capa::verify(stage, tid, std::chrono::seconds(1));  // 카운터까지
 ```
 
@@ -275,14 +286,21 @@ capa::Report spent = capa::verify(stage, tid, std::chrono::seconds(1));  // 카�
 함수는 `capa/flux.hpp`에 있다. 그룹 하나에는 선언을 하나만 할 수 있어서, 아래 세 호출은 서로 다른 그룹에 건다.
 
 ```cpp doc:flux
-capa::flux::bind(ex, *node, grab_group, "grab");  // CAPA_SPEC의 stage
-capa::flux::apply_checked(ex, *node, infer_group, opts, capa::Strictness::Hard);  // 값으로
-capa::flux::apply_checked(ex, *node, loop_group, spec.stage(name, "loop"));  // Spec의 stage
+capa::Result<void> done = capa::flux::bind(ex, *node, grab_group, "grab");  // CAPA_SPEC의 stage
+if (!done) {
+  std::fprintf(stderr, "%s\n", done.error().what.c_str());
+  return;
+}
+done = capa::flux::apply_checked(ex, *node, infer_group, opts, capa::Strictness::Hard);  // 값으로
+capa::Result<const capa::Stage *> stage = spec.stage(name, "loop");
+if (stage) {
+  done = capa::flux::apply_checked(ex, *node, loop_group, **stage);  // Spec의 stage
+}
 ```
 
 - `group`은 `node`의 것이어야 한다. `nullptr`은 노드의 기본 그룹이다.
 - rclcpp 콜백 그룹에는 이름이 없다. 그래서 파일의 `(node, label)`과 스레드를 잇는 것은 이 호출뿐이다. stage를 넘기면 호출할 때 대조한다. stage가 이 노드를 가리키는지, 빈 라벨이 기본 그룹과 짝인지, 라벨이 있으면 다른 그룹과 짝인지 본다. `external` stage는 거절한다.
-- 그룹 하나에 선언은 하나이고, 그 그룹은 `ex`가 맡는 그룹이어야 한다. 같은 그룹을 두 번 선언하면 호출할 때 예외를 던진다. 어느 자식 스레드도 맡지 않는 그룹을 선언하면 `spin()`이 거절한다.
+- 그룹 하나에 선언은 하나이고, 그 그룹은 `ex`가 맡는 그룹이어야 한다. 같은 그룹을 두 번 선언하면 호출할 때 거절한다. 어느 자식 스레드도 맡지 않는 그룹을 선언하면 `spin()`이 거절한다.
 - `spin()`은 SCHED_OTHER 스레드에서 부른다. 자식 스레드는 `spin()`을 부른 스레드의 스케줄로 시작한다. 그래서 RT 스레드가 `spin()`을 부르면 선언 없는 그룹도 그 우선순위로 돈다. `verify_process`가 그런 스레드를 보고한다.
 - message_filters synchronizer 하나의 입력은 전부 한 그룹에 둔다. 동기화 정책은 자기 `std::mutex`를 쥔 채 짝이 맞은 콜백을 돌린다. 이 뮤텍스에는 priority inheritance가 없다. 입력이 두 그룹의 스레드에 걸치면 두 그룹의 우선순위가 서로 묶인다.
 - message_filters 경로는 메모리를 할당한다(정책 큐, 프레임마다 `shared_ptr` control block). 그래서 이 경로는 hard 체인에 두지 않는다. 필터를 거치지 않는 flux 배달은 할당하지 않는다.
@@ -323,15 +341,16 @@ CAPA_SPEC=chain.yaml ros2 run capa_ros capa_component_container --ros-args -r __
 hook을 직접 거는 컨테이너는 아래 함수를 쓴다.
 
 ```cpp doc:container
-capa::flux::bind_declared(ex, *node);  // flux: 파일이 선언한 노드의 그룹 전부
-const capa::Stage * st = capa::flux::declared(spec, *node, group);  // 다른 executor는
-if (st != nullptr) {
-  capa::apply_checked(*st);  // 그룹의 스레드에서
+capa::Result<void> done = capa::flux::bind_declared(ex, *node);  // 파일이 선언한 그룹 전부
+// hook이 없는 executor:
+capa::Result<const capa::Stage *> st = capa::flux::declared(spec, *node, group);
+if (st && *st != nullptr) {
+  capa::Result<capa::Report> rep = capa::apply_checked(**st);  // 그룹의 스레드에서
 }
 ```
 
 - `bind_declared(ex, node)`는 `node`(`NodeBaseInterface`)의 그룹 중 `Spec::declared`가 stage를 찾은 그룹마다 bind를 등록한다. 불러온 노드마다 `spin()` 전에 한 번 부른다. 호출한 뒤에 생긴 그룹에는 bind를 등록하지 않는다. 라벨만 있는 stage는 걸지 않는다. 그런 stage는 `bind`로 건다. `CAPA_SPEC`이 없으면 아무것도 등록하지 않는다.
-- `declared(spec, node, group)`는 그룹 하나의 stage를 주고, 없으면 null이다. 노드의 그룹 전부를 보고 판정하므로 `Spec::declared`와 답이 같다. `group`이 `node`의 것이 아니면 예외를 던진다. hook이 없는 executor를 쓰면 그룹의 스레드에서 이 함수를 부르고, 받은 stage로 `apply_checked`한다. 노드의 그룹 목록 락을 잡으므로 `for_each_callback_group` 안에서 부르지 않는다.
+- `declared(spec, node, group)`는 그룹 하나의 stage를 주고, 없으면 null이다. 노드의 그룹 전부를 보고 판정하므로 `Spec::declared`와 답이 같다. `group`이 `node`의 것이 아니면 거절한다. hook이 없는 executor를 쓰면 그룹의 스레드에서 이 함수를 부르고, 받은 stage로 `apply_checked`한다. 노드의 그룹 목록 락을 잡으므로 `for_each_callback_group` 안에서 부르지 않는다.
 - `content(node, group)`는 그룹이 가진 것을 준다. rclcpp 구독의 토픽 이름, 서비스 이름, `add_to_callback_group`으로 넣은 flux 구독의 토픽 이름이다. flux `message_filters::Subscriber`와 agnocast 구독은 여기에 없다. 그런 구독을 가진 호출자는 토픽을 더해 `Spec::declared`를 직접 부른다.
 
 ## 6. Python
@@ -350,13 +369,13 @@ if not rep.ok():
 state = capa.current()          # state.policy는 os.SCHED_FIFO와 비교한다
 ```
 
-1절부터 5절까지의 이름은 전부 `capa`나 `capa.flux`에 같은 인자로 있다. `Options(policy=, priority=, cpus=, children=)`는 키워드 인자도 받는다. C++ 예외와 Python 예외의 대응은 아래와 같다.
+1절부터 5절까지의 이름은 전부 `capa`나 `capa.flux`에 같은 인자로 있다. `Options(policy=, priority=, cpus=, children=)`는 키워드 인자도 받는다. C++의 `ErrorKind`와 Python 예외의 대응은 아래와 같다.
 
-| C++ | Python |
+| C++ `ErrorKind` | Python |
 | --- | --- |
-| `std::system_error`(커널 거절) | `OSError` |
-| `std::invalid_argument`(다르게 해석될 요청, external stage, 이미 쥔 stage) | `ValueError` |
-| `std::runtime_error`(preflight 거절, 되읽기 불일치, 파일 규칙, 없는 라벨) | `RuntimeError` |
+| `System`(커널 거절) | `OSError` |
+| `InvalidArgument`(다르게 해석될 요청, external stage, 이미 쥔 stage) | `ValueError` |
+| `Failed`(preflight 거절, 되읽기 불일치, 파일 규칙, 없는 라벨) | `RuntimeError` |
 
 Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC 때문에 지연에 상한이 없다. Python에서 capa가 정하는 것은 여러 스레드가 동시에 runnable일 때 커널이 어느 스레드를 고르는지, 그리고 각 스레드가 어느 코어를 쓰는지다. 이것은 GIL을 놓는 구간(numpy, 디코딩, I/O)에서 의미가 있다.
 
@@ -364,6 +383,7 @@ Python은 RT 대상이 아니다. 어떤 우선순위를 걸어도 GIL과 GC 때
 
 | 차이 | 이유 |
 | --- | --- |
+| 실패를 C++에서는 `capa::Result`로, Python에서는 예외로 알린다 | 예외는 Python이 실패를 알리는 표준 방식이다 |
 | `spawn`이 C++에서는 `std::thread`, Python에서는 시작된 `threading.Thread`를 준다 | Python 함수는 Python이 시작한 스레드에서 돌아야 한다 |
 | `capa.flux`는 `group`이 `node`의 것인지 확인하지 않는다 | flux Python 그룹은 자기 노드를 모른다. stage의 노드는 `node`와 대조한다 |
 | `capa.flux`에서 `group=None`은 노드 단위(`add_node`에 준 노드) | rclpy는 단위를 그룹과 노드로 나눈다. C++에는 그룹만 있다 |

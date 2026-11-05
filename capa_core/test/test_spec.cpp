@@ -1,4 +1,5 @@
 #include "capa/spec.hpp"
+#include "result_test_util.hpp"
 
 #include <gtest/gtest.h>
 #include <pthread.h>
@@ -72,7 +73,7 @@ chains:
 TEST(Spec, ParsesAChainAndDerivesTheControlPriority)
 {
   SpecFile f(kGood);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
   EXPECT_FALSE(spec.empty());
   EXPECT_EQ(spec.stages().size(), 4u);
 
@@ -110,7 +111,7 @@ chains:
         policy: fifo
         priority: 90
 )");
-  EXPECT_THROW(capa::Spec::load(f.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
 
 TEST(Spec, NonRtStagesSitOutsideTheOrdering)
@@ -128,7 +129,7 @@ chains:
       - node: /logger_node
         policy: other
 )");
-  EXPECT_NO_THROW(capa::Spec::load(f.path()));
+  EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
 
 TEST(Spec, AStageMaySitOnTwoChainsButNotTwoWays)
@@ -156,12 +157,12 @@ chains:
   char same[1024];
   std::snprintf(same, sizeof same, body, 70);
   SpecFile agree(same);
-  EXPECT_NO_THROW(capa::Spec::load(agree.path())) << "one stage feeding two chains is normal";
+  EXPECT_TRUE((capa::Spec::load(agree.path())).ok()) << "one stage feeding two chains is normal";
 
   char differ[1024];
   std::snprintf(differ, sizeof differ, body, 40);
   SpecFile conflict(differ);
-  EXPECT_THROW(capa::Spec::load(conflict.path()), std::runtime_error)
+  EXPECT_EQ(kind_of(capa::Spec::load(conflict.path())), capa::ErrorKind::Failed)
     << "two chains asking one thread to run differently is the conflict only a shared file sees";
 }
 
@@ -190,7 +191,7 @@ chains:
         policy: fifo
         priority: 90
 )");
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
   const auto * cam = spec.find("/camera_node");
   ASSERT_NE(cam, nullptr);
   EXPECT_EQ(cam->strict, capa::Strictness::Hard)
@@ -215,14 +216,14 @@ chains:
     char text[512];
     std::snprintf(text, sizeof text, body, bad);
     SpecFile f(text);
-    EXPECT_THROW(capa::Spec::load(f.path()), std::runtime_error)
+    EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed)
       << bad << " is not a priority any thread can run at, and verify would only ever fail it";
   }
   for (int fine : {0, 1, 99}) {
     char text[512];
     std::snprintf(text, sizeof text, body, fine);
     SpecFile f(text);
-    EXPECT_NO_THROW(capa::Spec::load(f.path()))
+    EXPECT_TRUE((capa::Spec::load(f.path())).ok())
       << fine << " is the range edge or the undeclared value";
   }
 }
@@ -240,7 +241,7 @@ chains:
         policy: fifo
         priorty: 70
 )");
-  EXPECT_THROW(capa::Spec::load(typo.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(typo.path())), capa::ErrorKind::Failed);
 
   SpecFile stray_target(R"(
 chains:
@@ -250,7 +251,7 @@ chains:
       - node: /a
         policy: other
 )");
-  EXPECT_THROW(capa::Spec::load(stray_target.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(stray_target.path())), capa::ErrorKind::Failed);
 
   SpecFile relative(R"(
 chains:
@@ -260,7 +261,7 @@ chains:
       - node: a
         policy: other
 )");
-  EXPECT_THROW(capa::Spec::load(relative.path()), std::runtime_error)
+  EXPECT_EQ(kind_of(capa::Spec::load(relative.path())), capa::ErrorKind::Failed)
     << "a node name that is not fully qualified names a different node than the running one";
 }
 
@@ -278,26 +279,26 @@ chains:
         policy: fifo
         priority: 60
 )");
-  EXPECT_THROW(capa::Spec::load(f.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
 
 TEST(Spec, LookupByNodeRejectsAnUnknownLabel)
 {
   SpecFile f(kGood);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
 
-  EXPECT_NO_THROW((void)spec.stage("/perception_node", "infer"));
-  EXPECT_EQ(spec.stage("/perception_node", "infer").opts.priority, 75);
+  EXPECT_TRUE((spec.stage("/perception_node", "infer")).ok());
+  EXPECT_EQ((*must(spec.stage("/perception_node", "infer"))).opts.priority, 75);
 
   // Silently applying nothing is how a typo survives to runtime.
-  EXPECT_THROW((void)spec.stage("/perception_node", "infr"), std::runtime_error);
-  EXPECT_THROW((void)spec.stage("/not_in_the_spec"), std::runtime_error);
+  EXPECT_EQ(kind_of(spec.stage("/perception_node", "infr")), capa::ErrorKind::Failed);
+  EXPECT_EQ(kind_of(spec.stage("/not_in_the_spec")), capa::ErrorKind::Failed);
 }
 
 TEST(Spec, NoEnvIsAnEmptySpec)
 {
   ::unsetenv("CAPA_SPEC");
-  const auto spec = capa::Spec::load();
+  const auto spec = must(capa::Spec::load());
   EXPECT_TRUE(spec.empty()) << "declaring nothing stays the no-op it is today";
 }
 
@@ -322,7 +323,7 @@ chains:
         priority: 80
         cpus: [2]
 )");
-  EXPECT_THROW(capa::Spec::load(hard.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(hard.path())), capa::ErrorKind::Failed);
 
   // Different cores is the arrangement the split was for.
   SpecFile apart(R"(
@@ -341,7 +342,7 @@ chains:
         priority: 80
         cpus: [3]
 )");
-  EXPECT_NO_THROW(capa::Spec::load(apart.path()));
+  EXPECT_TRUE((capa::Spec::load(apart.path())).ok());
 }
 
 TEST(Spec, SoftChainsMayShareAnRtCore)
@@ -365,7 +366,7 @@ chains:
         priority: 80
         cpus: [2]
 )");
-  EXPECT_NO_THROW(capa::Spec::load(f.path()));
+  EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
 
 TEST(Spec, TheCollisionIsFoundAcrossChainsToo)
@@ -391,7 +392,7 @@ chains:
         priority: 80
         cpus: [2]
 )");
-  EXPECT_THROW(capa::Spec::load(f.path()), std::runtime_error);
+  EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
 
 TEST(Spec, NonRtStagesDoNotCollide)
@@ -412,7 +413,7 @@ chains:
         policy: other
         cpus: [2]
 )");
-  EXPECT_NO_THROW(capa::Spec::load(f.path()));
+  EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
 
 // One stage names one thread. A second live thread taking it would leave the file describing
@@ -428,25 +429,25 @@ chains:
         group: worker
         cpus: [0]
 )");
-  const auto spec = capa::Spec::load(f.path());
-  const capa::Stage & stage = spec.stage("/claim", "worker");
+  const auto spec = must(capa::Spec::load(f.path()));
+  const capa::Stage & stage = (*must(spec.stage("/claim", "worker")));
 
   std::promise<void> applied;
   std::promise<void> release;
   std::thread holder([&] {
-    capa::apply_checked(stage);
-    capa::apply_checked(stage);  // the holder re-applying is not a second thread
+    must(capa::apply_checked(stage));
+    must(capa::apply_checked(stage));  // the holder re-applying is not a second thread
     applied.set_value();
     release.get_future().wait();
   });
   applied.get_future().wait();
 
-  std::string why = "<no exception>";
+  std::string why = "<no error>";
   std::thread second([&] {
-    try {
-      capa::apply_checked(stage);
-    } catch (const std::invalid_argument & e) {
-      why = e.what();
+    const auto second_apply = capa::apply_checked(stage);
+    EXPECT_EQ(kind_of(second_apply), capa::ErrorKind::InvalidArgument);
+    if (!second_apply) {
+      why = second_apply.error().what;
     }
   });
   second.join();
@@ -454,7 +455,7 @@ chains:
   holder.join();
   EXPECT_NE(why.find("one stage declares one thread"), std::string::npos) << why;
 
-  std::thread after([&] { EXPECT_NO_THROW(capa::apply_checked(stage)); });
+  std::thread after([&] { EXPECT_TRUE((capa::apply_checked(stage)).ok()); });
   after.join();
 }
 
@@ -466,12 +467,8 @@ namespace
 auto load_error(const std::string & body) -> std::string
 {
   SpecFile f(body);
-  try {
-    capa::Spec::load(f.path());
-  } catch (const std::runtime_error & e) {
-    return e.what();
-  }
-  return "<loaded>";
+  const auto spec = capa::Spec::load(f.path());
+  return spec ? "<loaded>" : spec.error().what;
 }
 
 }  // namespace
@@ -627,7 +624,7 @@ chains:
     stages:
       - {name: driver_poll, policy: other}
 )");
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
   ASSERT_NE(spec.find("driver_poll"), nullptr);
   EXPECT_EQ(spec.find("driver_poll", "x"), nullptr) << "a name stage has no group";
   EXPECT_EQ(spec.find("/driver_poll"), nullptr) << "a leading '/' looks up a node";
@@ -655,7 +652,8 @@ chains:
     stages:
       - {node: /omp, policy: fifo, priority: 20, children: inherit}
 )");
-  EXPECT_EQ(capa::Spec::load(f.path()).stage("/omp").opts.children, capa::Children::Inherit);
+  EXPECT_EQ(
+    must(must(capa::Spec::load(f.path())).stage("/omp"))->opts.children, capa::Children::Inherit);
 
   EXPECT_NE(
     load_error("chains: {c: {target: soft, stages: [{node: /a, children: inherit}]}}")
@@ -712,7 +710,7 @@ TEST(Bind, WithoutASpecItDoesNothing)
 {
   ::unsetenv("CAPA_SPEC");
   const auto before = capa::current();
-  std::thread t([] { EXPECT_TRUE(capa::bind("/bind_node", "work").findings.empty()); });
+  std::thread t([] { EXPECT_TRUE(must(capa::bind("/bind_node", "work")).findings.empty()); });
   t.join();
   EXPECT_EQ(capa::current().cpus, before.cpus);
 }
@@ -726,7 +724,7 @@ TEST(Bind, PutsTheCallingThreadOnItsStage)
 
   std::vector<std::uint32_t> got;
   std::thread t([&] {
-    capa::bind("/bind_node", "work");
+    must(capa::bind("/bind_node", "work"));
     got = capa::current().cpus;
   });
   t.join();
@@ -754,8 +752,8 @@ auto asks_capad() -> bool
 
 auto may_set_fifo(const std::string & path) -> bool
 {
-  const auto spec = capa::Spec::load(path);
-  const capa::Report rep = capa::preflight(spec.stage("/ask_node").opts);
+  const auto spec = must(capa::Spec::load(path));
+  const capa::Report rep = must(capa::preflight((*must(spec.stage("/ask_node"))).opts));
   const capa::Finding * perm = rep.find("policy-permission");
   return perm != nullptr && perm->verdict == capa::Verdict::Ok;
 }
@@ -773,7 +771,7 @@ TEST(Bind, WithoutPermissionTheThreadAsksCapadAndIsRefusedWithoutAnAnswer)
   std::atomic<bool> refused{false};
   bool still_asks = true;
   std::thread t([&] {
-    EXPECT_THROW(capa::bind("/ask_node"), std::runtime_error);
+    EXPECT_EQ(kind_of(capa::bind("/ask_node")), capa::ErrorKind::Failed);
     still_asks = asks_capad();
     refused = true;
   });
@@ -791,7 +789,8 @@ TEST(Bind, ATypoIsRefusedNotIgnored)
 {
   SpecFile f(pin_spec(0));
   SpecEnv env(f.path());
-  std::thread t([] { EXPECT_THROW(capa::bind("/bind_node", "wrok"), std::runtime_error); });
+  std::thread t(
+    [] { EXPECT_EQ(kind_of(capa::bind("/bind_node", "wrok")), capa::ErrorKind::Failed); });
   t.join();
 }
 
@@ -803,7 +802,8 @@ TEST(Spawn, RunsTheFunctionOnlyAfterTheThreadIsSet)
   SpecEnv env(f.path());
 
   std::vector<std::uint32_t> first_look;
-  std::thread t = capa::spawn("/bind_node", "work", [&] { first_look = capa::current().cpus; });
+  std::thread t =
+    must(capa::spawn("/bind_node", "work", [&] { first_look = capa::current().cpus; }));
   t.join();
   EXPECT_EQ(first_look, std::vector<std::uint32_t>{allowed.back()})
     << "the function ran before the stage was applied";
@@ -814,7 +814,8 @@ TEST(Spawn, ARefusalReachesTheCallerAndTheFunctionNeverRuns)
   SpecFile f(pin_spec(0));
   SpecEnv env(f.path());
   bool ran = false;
-  EXPECT_THROW(capa::spawn("/bind_node", "wrok", [&] { ran = true; }), std::runtime_error);
+  EXPECT_EQ(
+    kind_of(capa::spawn("/bind_node", "wrok", [&] { ran = true; })), capa::ErrorKind::Failed);
   EXPECT_FALSE(ran);
 }
 
@@ -830,8 +831,8 @@ chains:
       - {node: /ord, group: a, policy: fifo, priority: 10}
       - {node: /ord, group: b, policy: fifo, priority: 20}
 )");
-  const auto spec = capa::Spec::load(f.path());
-  const capa::Report host = capa::preflight(spec.stage("/ord", "a").opts);
+  const auto spec = must(capa::Spec::load(f.path()));
+  const capa::Report host = must(capa::preflight((*must(spec.stage("/ord", "a"))).opts));
   const capa::Finding * perm = host.find("policy-permission");
   ASSERT_NE(perm, nullptr);
   if (perm->verdict != capa::Verdict::Ok) {
@@ -839,7 +840,7 @@ chains:
   }
 
   capa::Report rep;
-  std::thread t([&] { rep = capa::apply_checked(spec.stage("/ord", "a")); });
+  std::thread t([&] { rep = must(capa::apply_checked((*must(spec.stage("/ord", "a"))))); });
   t.join();
   ASSERT_NE(rep.find("priority-order"), nullptr);
   EXPECT_EQ(rep.find("priority-order")->verdict, capa::Verdict::Ok) << rep.to_string();
@@ -864,7 +865,7 @@ TEST(Docs, EveryChainFileInTheUserDocumentsLoads)
         inside = false;
         ++fences;
         SpecFile f(fence);
-        EXPECT_NO_THROW(capa::Spec::load(f.path())) << doc << ":\n" << fence;
+        EXPECT_TRUE((capa::Spec::load(f.path())).ok()) << doc << ":\n" << fence;
       } else if (inside) {
         fence += line + "\n";
       }
@@ -984,9 +985,11 @@ TEST(Bind, AMatchedStageIsRefused)
   SpecFile f(
     "chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, thread: "
     "dds.recv}, cpus: [0]}]}}\n");
-  const auto spec = capa::Spec::load(f.path());
-  std::thread t(
-    [&] { EXPECT_THROW(capa::apply_checked(spec.stage("rx")), std::invalid_argument); });
+  const auto spec = must(capa::Spec::load(f.path()));
+  std::thread t([&] {
+    EXPECT_EQ(
+      kind_of(capa::apply_checked((*must(spec.stage("rx"))))), capa::ErrorKind::InvalidArgument);
+  });
   t.join();
 }
 
@@ -997,12 +1000,14 @@ TEST(Bind, AFailedRebindKeepsTheStageItHeld)
   SpecFile f(
     "chains: {c: {target: soft, stages: [{node: /rebind, group: a, cpus: [" +
     std::to_string(allowed.back()) + "]}, {node: /rebind, group: b, cpus: [1000]}]}}\n");
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
   std::thread t([&] {
-    capa::apply_checked(spec.stage("/rebind", "a"));
-    EXPECT_ANY_THROW(capa::apply_checked(spec.stage("/rebind", "b")));
+    must(capa::apply_checked((*must(spec.stage("/rebind", "a")))));
+    EXPECT_FALSE((capa::apply_checked((*must(spec.stage("/rebind", "b"))))).ok());
     std::thread other([&] {
-      EXPECT_THROW(capa::apply_checked(spec.stage("/rebind", "a")), std::invalid_argument);
+      EXPECT_EQ(
+        kind_of(capa::apply_checked((*must(spec.stage("/rebind", "a"))))),
+        capa::ErrorKind::InvalidArgument);
     });
     other.join();
   });
@@ -1018,7 +1023,7 @@ chains:
     stages:
       - {name: toucher, policy: other}
 )");
-  const capa::Stage stage = capa::Spec::load(file.path()).stage("toucher");
+  const capa::Stage stage = *must(must(capa::Spec::load(file.path())).stage("toucher"));
   std::promise<int> tid;
   std::atomic<bool> stop{false};
   std::thread t([&] {
@@ -1062,7 +1067,7 @@ chains:
     stages:
       - {name: plain, policy: other}
 )");
-  const capa::Spec spec = capa::Spec::load(file.path());
+  const capa::Spec spec = must(capa::Spec::load(file.path()));
   EXPECT_EQ(capa::verify_process(spec).find("io-uring")->verdict, capa::Verdict::Ok);
 
   std::promise<void> named;
@@ -1138,10 +1143,10 @@ chains:
 TEST(Spec, DeclaredFindsAGroupByItsContentNotItsPosition)
 {
   SpecFile f(kPlanner);
-  const auto spec = capa::Spec::load(f.path());
+  const auto spec = must(capa::Spec::load(f.path()));
   std::vector<capa::GroupContent> groups = {
     group({"/odom"}, true), group({"/map"}), group({"/path_optimizer/trajectory"})};
-  auto got = spec.declared("/mvp", groups);
+  auto got = must(spec.declared("/mvp", groups));
   ASSERT_EQ(got.size(), 3u);
   ASSERT_NE(got[0], nullptr);
   EXPECT_EQ(got[0]->group, "");
@@ -1150,25 +1155,26 @@ TEST(Spec, DeclaredFindsAGroupByItsContentNotItsPosition)
   EXPECT_EQ(got[2]->group, "traj");
 
   groups.insert(groups.begin() + 1, group({"/new"}));
-  got = spec.declared("/mvp", groups);
+  got = must(spec.declared("/mvp", groups));
   ASSERT_NE(got[3], nullptr);
   EXPECT_EQ(got[3]->group, "traj") << "one more group does not move the stage";
 
-  EXPECT_EQ(spec.declared("/nobody", groups), std::vector<const capa::Stage *>(4, nullptr));
+  EXPECT_EQ(must(spec.declared("/nobody", groups)), std::vector<const capa::Stage *>(4, nullptr));
 }
 
 TEST(Spec, DeclaredRefusesToGuess)
 {
   SpecFile f(kPlanner);
-  const auto spec = capa::Spec::load(f.path());
-  EXPECT_THROW(
-    spec.declared(
+  const auto spec = must(capa::Spec::load(f.path()));
+  EXPECT_EQ(
+    kind_of(spec.declared(
       "/mvp", {group({}, true), group({"/path_optimizer/trajectory"}),
-               group({"/path_optimizer/trajectory"})}),
-    std::runtime_error)
+               group({"/path_optimizer/trajectory"})})),
+    capa::ErrorKind::Failed)
     << "two groups hold the subscription";
-  EXPECT_THROW(
-    spec.declared("/mvp", {group({"/path_optimizer/trajectory"}, true)}), std::runtime_error)
+  EXPECT_EQ(
+    kind_of(spec.declared("/mvp", {group({"/path_optimizer/trajectory"}, true)})),
+    capa::ErrorKind::Failed)
     << "the default group is claimed by the default stage and by the holds stage";
 }
 
@@ -1177,7 +1183,7 @@ TEST(Bind, BindDeclaredBindsOnlyWhatTheFileDeclares)
   const auto allowed = capa::current().cpus;
   ASSERT_FALSE(allowed.empty());
   ::unsetenv("CAPA_SPEC");
-  std::thread([] { EXPECT_FALSE(capa::bind_declared("/bind_node", "work")); }).join();
+  std::thread([] { EXPECT_FALSE(must(capa::bind_declared("/bind_node", "work"))); }).join();
 
   SpecFile f(
     pin_spec(allowed.back()) +
@@ -1188,17 +1194,24 @@ TEST(Bind, BindDeclaredBindsOnlyWhatTheFileDeclares)
   std::vector<std::uint32_t> after;
   std::thread([&] {
     before = capa::current().cpus;
-    EXPECT_FALSE(capa::bind_declared("/bind_node", "wrok"));
-    EXPECT_FALSE(capa::bind_declared("/bind_node", "ext"));
-    EXPECT_FALSE(capa::bind_declared("rx"));
+    EXPECT_FALSE(must(capa::bind_declared("/bind_node", "wrok")));
+    EXPECT_FALSE(must(capa::bind_declared("/bind_node", "ext")));
+    EXPECT_FALSE(must(capa::bind_declared("rx")));
     after = capa::current().cpus;
   }).join();
   EXPECT_EQ(after, before) << "nothing undeclared was applied";
 
   std::thread([&] {
-    const auto rep = capa::bind_declared("/bind_node", "work");
+    const auto rep = must(capa::bind_declared("/bind_node", "work"));
     EXPECT_TRUE(rep.has_value());
     after = capa::current().cpus;
   }).join();
   EXPECT_EQ(after, std::vector<std::uint32_t>{allowed.back()});
+}
+
+// yaml-cpp reports through exceptions, and one thrown outside the parsing loop would leave load().
+TEST(Spec, AKeyThatIsNoStringIsAnErrorRatherThanAnException)
+{
+  SpecFile f("[a, b]: 1\nchains: {}\n");
+  EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }

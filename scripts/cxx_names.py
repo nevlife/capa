@@ -13,7 +13,7 @@ CORE_HEADERS = ("capa_core/include/capa/rt.hpp", "capa_core/include/capa/spec.hp
 FLUX_HEADERS = ("capa_ros/include/capa/flux.hpp",)
 
 TYPE = re.compile(r"(?:struct|class|enum class)\s+(\w+)")
-FUNCTION = re.compile(r"(?:const\s+)?[\w:<>]+[\s&*]+(\w+)\(")
+FUNCTION = re.compile(r"(?:const\s+)?(?:Result<[^(]*>|[\w:<>]+)[\s&*]+(\w+)\(")
 
 
 def names(headers):

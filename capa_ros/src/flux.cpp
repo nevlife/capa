@@ -17,7 +17,7 @@ namespace detail
 
 // An rclcpp callback group has no name and does not know its node, so the pairing at this call
 // is the only link between the file's (node, label) and a thread. It is checked here.
-rclcpp::CallbackGroup::SharedPtr owned_group(
+Result<rclcpp::CallbackGroup::SharedPtr> owned_group(
   rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const char * caller)
 {
   const auto base = node.get_node_base_interface();
@@ -28,49 +28,58 @@ rclcpp::CallbackGroup::SharedPtr owned_group(
   base->for_each_callback_group(
     [&](const rclcpp::CallbackGroup::SharedPtr & g) { owned = owned || g == group; });
   if (!owned) {
-    throw std::invalid_argument(
-      std::string("capa: ") + caller + ": the group does not belong to node " +
-      base->get_fully_qualified_name());
+    return Error{
+      ErrorKind::InvalidArgument, std::string("capa: ") + caller +
+                                    ": the group does not belong to node " +
+                                    base->get_fully_qualified_name()};
   }
   return group;
 }
 
-rclcpp::CallbackGroup::SharedPtr stage_group(
+Result<rclcpp::CallbackGroup::SharedPtr> stage_group(
   rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage)
 {
-  capa::detail::reject_external(stage, "flux::apply_checked()");
+  if (auto r = capa::detail::reject_external(stage, "flux::apply_checked()"); !r) {
+    return r.error();
+  }
   const std::string where = capa::detail::stage_name(stage);
   const std::string actual = node.get_fully_qualified_name();
   if (stage.node != actual) {
-    throw std::invalid_argument(
-      "capa: flux::apply_checked: stage " + where + " names node " + stage.node +
-      " but was handed node " + actual);
+    return Error{
+      ErrorKind::InvalidArgument, "capa: flux::apply_checked: stage " + where + " names node " +
+                                    stage.node + " but was handed node " + actual};
   }
-  const auto g = owned_group(node, group, "flux::apply_checked");
+  auto owned = owned_group(node, group, "flux::apply_checked");
+  if (!owned) {
+    return owned;
+  }
+  const auto g = *std::move(owned);
   if (!stage.holds.empty()) {
     const GroupContent c = content(*node.get_node_base_interface(), g);
     const auto & names = stage.holds.subscription.empty() ? c.services : c.subscriptions;
     const auto & name =
       stage.holds.subscription.empty() ? stage.holds.service : stage.holds.subscription;
     if (std::find(names.begin(), names.end(), name) == names.end()) {
-      throw std::invalid_argument(
-        "capa: flux::apply_checked: stage " + where + " holds " + name +
-        ", and the group handed over does not");
+      return Error{
+        ErrorKind::InvalidArgument, "capa: flux::apply_checked: stage " + where + " holds " + name +
+                                      ", and the group handed over does not"};
     }
     return g;
   }
   const bool is_default = node.get_node_base_interface()->get_default_callback_group() == g;
   if (stage.group.empty() && !is_default) {
-    throw std::invalid_argument(
+    return Error{
+      ErrorKind::InvalidArgument,
       "capa: flux::apply_checked: stage " + where +
-      " names no group, which the file means as the node's default callback group, but the "
-      "group handed over is not that one");
+        " names no group, which the file means as the node's default callback group, but the "
+        "group handed over is not that one"};
   }
   if (!stage.group.empty() && is_default) {
-    throw std::invalid_argument(
+    return Error{
+      ErrorKind::InvalidArgument,
       "capa: flux::apply_checked: stage " + where +
-      " names a group, but the group handed over is the node's default one, which the file "
-      "spells as an omitted label");
+        " names a group, but the group handed over is the node's default one, which the file "
+        "spells as an omitted label"};
   }
   return g;
 }
@@ -87,7 +96,7 @@ std::vector<rclcpp::CallbackGroup::SharedPtr> groups_of(
   return out;
 }
 
-std::vector<const Stage *> resolve(
+Result<std::vector<const Stage *>> resolve(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
   const std::vector<rclcpp::CallbackGroup::SharedPtr> & groups)
 {
@@ -101,11 +110,15 @@ std::vector<const Stage *> resolve(
 
 }  // namespace
 
-std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>> declared_groups(
+Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>> declared_groups(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
 {
   const auto groups = groups_of(node);
-  const auto stages = resolve(spec, node, groups);
+  const auto resolved = resolve(spec, node, groups);
+  if (!resolved) {
+    return resolved.error();
+  }
+  const auto & stages = *resolved;
   std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>> out;
   for (std::size_t i = 0; i < groups.size(); ++i) {
     if (stages[i] != nullptr) {
@@ -143,7 +156,7 @@ GroupContent content(
   return c;
 }
 
-const Stage * declared(
+Result<const Stage *> declared(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
   const rclcpp::CallbackGroup::SharedPtr & group)
 {
@@ -151,11 +164,16 @@ const Stage * declared(
   const auto groups = detail::groups_of(node);
   const auto it = std::find(groups.begin(), groups.end(), g);
   if (it == groups.end()) {
-    throw std::invalid_argument(
-      std::string("capa: flux::declared: the group does not belong to node ") +
-      node.get_fully_qualified_name());
+    return Error{
+      ErrorKind::InvalidArgument, std::string("capa: flux::declared: the group does not belong to "
+                                              "node ") +
+                                    node.get_fully_qualified_name()};
   }
-  return detail::resolve(spec, node, groups)[static_cast<std::size_t>(it - groups.begin())];
+  const auto stages = detail::resolve(spec, node, groups);
+  if (!stages) {
+    return stages.error();
+  }
+  return (*stages)[static_cast<std::size_t>(it - groups.begin())];
 }
 
 }  // namespace capa::flux
