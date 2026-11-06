@@ -283,6 +283,13 @@ capa::Report spent = capa::verify(stage, tid, std::chrono::seconds(1));  // 카�
 
 `flux::PartitionedExecutor`는 콜백 그룹마다 스레드를 따로 준다. `capa_ros`의 `capa::flux` 함수는 core의 같은 이름 함수에 executor, 노드, 그룹 인자를 앞에 붙인 형태다. executor는 템플릿 인자다. executor의 헤더는 사용하는 쪽에서 직접 include한다.
 
+rclcpp executor는 그룹마다 스레드를 정해 두지 않고 스레드 시작 hook도 없어서 그룹별 스케줄을 걸 수 없다. 그래서 capa는 flux executor에 걸고, 거는 방법은 둘이다.
+
+| 방법 | 쓰는 때 | 그룹 지정 |
+| --- | --- | --- |
+| `capa::flux::bind` | executor를 만드는 `main()`을 직접 쓸 때 | 호출에 준 라벨 |
+| `capa_component_container` | 노드를 launch로 한 컨테이너에 묶을 때. `main()`이 컨테이너의 것이라 `bind`를 부를 수 없고, flux 컨테이너는 capa를 부르지 않는다 | 기본 그룹 stage와 `holds`(아래 "컨테이너") |
+
 함수는 `capa/flux.hpp`에 있다. 그룹 하나에는 선언을 하나만 할 수 있어서, 아래 세 호출은 서로 다른 그룹에 건다.
 
 ```cpp doc:flux
