@@ -136,7 +136,7 @@ fn sets_the_one_thread_a_stage_matches() {
         ffi::bindings()
             .iter()
             .any(|b| b.name == "tgt" && b.tid == target.tid),
-        "capa status would not see the stage the daemon set"
+        "capa status would not see the stage the daemon set: {lines:?}"
     );
     rec.restore();
 }
