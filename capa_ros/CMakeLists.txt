@@ -26,18 +26,18 @@ target_include_directories(capa_ros PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(capa_ros PUBLIC capa_core::capa_core flux_cpp::flux_cpp)
 ament_target_dependencies(capa_ros PUBLIC rclcpp)
-target_compile_options(capa_ros PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(capa_ros PRIVATE -Wall -Wextra -Wpedantic -Werror)
 set_target_properties(capa_ros PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # The container's manager, shared by the executable and its test. Not installed.
 add_library(capa_component_manager STATIC src/component_manager.cpp)
 target_include_directories(capa_component_manager PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(capa_component_manager PUBLIC capa_ros flux_components::flux_components)
-target_compile_options(capa_component_manager PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(capa_component_manager PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_executable(capa_component_container src/component_container.cpp)
 target_link_libraries(capa_component_container capa_component_manager)
-target_compile_options(capa_component_container PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(capa_component_container PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS capa_ros

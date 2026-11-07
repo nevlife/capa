@@ -63,7 +63,7 @@ target_include_directories(capa_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_compile_options(capa_core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(capa_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 

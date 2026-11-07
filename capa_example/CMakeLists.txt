@@ -15,14 +15,14 @@ find_package(sensor_msgs REQUIRED)
 
 add_executable(preflight src/preflight.cpp)
 target_link_libraries(preflight capa_core::capa_core)
-target_compile_options(preflight PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(preflight PRIVATE -Wall -Wextra -Wpedantic -Werror)
 install(TARGETS preflight DESTINATION lib/${PROJECT_NAME})
 
 add_executable(chain src/chain.cpp)
 target_link_libraries(chain capa_ros::capa_ros)
 target_include_directories(chain PRIVATE ${flux_std_adapters_INCLUDE_DIRS})
 ament_target_dependencies(chain rclcpp sensor_msgs)
-target_compile_options(chain PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(chain PRIVATE -Wall -Wextra -Wpedantic -Werror)
 install(TARGETS chain DESTINATION lib/${PROJECT_NAME})
 
 # The C++ fences of docs/api.md, compiled so a fence cannot name what does not exist. Never
@@ -30,7 +30,7 @@ install(TARGETS chain DESTINATION lib/${PROJECT_NAME})
 add_library(capa_doc_examples STATIC src/doc_api.cpp)
 target_link_libraries(capa_doc_examples capa_ros::capa_ros)
 ament_target_dependencies(capa_doc_examples rclcpp)
-target_compile_options(capa_doc_examples PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(capa_doc_examples PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
