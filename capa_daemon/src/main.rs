@@ -1,14 +1,23 @@
 //! capad [--spec FILE] [--interval SEC] [--once]
 //!
+//! Between passes it reads the kernel's process events, and a pass walks /proc only when one of
+//! them can change what a matched stage finds, or once every RESCAN. Without the events every pass
+//! walks /proc.
+//!
 //! SIGHUP rereads the file (a file that breaks a rule is refused and the old one kept). SIGTERM and
 //! SIGINT put every thread the daemon set back and exit. --once runs one pass and exits, leaving
 //! what it set in place. Either way it starts by taking over what a crashed run left.
 
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use capad::procevents::ProcEvents;
 use capad::reconcile::Reconciler;
 use capad::signals::{Signal, Signals};
+
+/// How long a pass may go without walking /proc, for what the events cannot say: a matched thread
+/// that came and went while the socket was being read, or a kernel that stopped sending.
+const RESCAN: Duration = Duration::from_secs(30);
 
 fn print(lines: Vec<String>) {
     for l in lines {
@@ -69,14 +78,39 @@ fn main() -> ExitCode {
     };
     print(rec.recover());
     eprintln!("capad: watching {path} every {interval}s");
+    let mut events = match ProcEvents::open() {
+        Ok(e) => Some(e),
+        Err(e) => {
+            eprintln!("capad: no process events ({e}), walking /proc every pass");
+            None
+        }
+    };
+    let mut walk = true;
+    let mut walked = Instant::now();
     loop {
-        print(rec.pass());
+        if let Some(socket) = &events {
+            match socket.drain(|event| rec.matters(event)) {
+                Ok(needed) => walk |= needed,
+                Err(e) => {
+                    eprintln!("capad: process events lost ({e}), walking /proc every pass");
+                    events = None;
+                }
+            }
+        }
+        if walk || events.is_none() || walked.elapsed() >= RESCAN {
+            print(rec.pass());
+            walked = Instant::now();
+            walk = false;
+        } else {
+            print(rec.pass_quiet());
+        }
         match signals.wait(Duration::from_secs_f64(interval)) {
             Ok(None) => {}
             Ok(Some(Signal::Reload)) => match Reconciler::load(&path) {
                 Ok(mut next) => {
                     print(next.adopt(&mut rec));
                     rec = next;
+                    walk = true;
                     eprintln!("capad: reloaded {path}");
                 }
                 Err(e) => eprintln!("capad: reload refused, keeping the old file: {e}"),

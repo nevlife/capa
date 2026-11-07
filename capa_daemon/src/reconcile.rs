@@ -3,7 +3,7 @@
 //! and record what it holds so `capa status` sees it. Everything the daemon decides beyond the
 //! core's verdicts is here; main only loops, reloads and stops.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use cxx::UniquePtr;
 
 use crate::ffi::{self, Binding, HeldStage, Match, Spec, Stage, Task, ThreadState};
+use crate::procevents::Event;
 use crate::state;
 
 const STATE_HEAD: &str = "capad-state 2";
@@ -132,6 +133,10 @@ pub struct Reconciler {
     moved: BTreeMap<Task, Moved>,
     last: BTreeMap<String, String>,
     saved: String,
+    /// The comms the matched stages name, cut to what the kernel keeps.
+    comms: BTreeSet<Vec<u8>>,
+    /// The stages that matched more than one thread: an exit can leave them with one.
+    ambiguous: BTreeSet<String>,
 }
 
 impl Reconciler {
@@ -142,6 +147,12 @@ impl Reconciler {
     pub fn with_roots(path: &str, roots: Roots) -> Result<Self, cxx::Exception> {
         let spec = ffi::load(path)?;
         let stages = ffi::stages(&spec);
+        let comms = stages
+            .iter()
+            .flat_map(|s| [s.matcher.process.as_str(), s.matcher.thread.as_str()])
+            .filter(|name| !name.is_empty())
+            .map(|name| comm_of(name).to_vec())
+            .collect();
         Ok(Self {
             spec,
             stages,
@@ -150,11 +161,58 @@ impl Reconciler {
             moved: BTreeMap::new(),
             last: BTreeMap::new(),
             saved: String::new(),
+            comms,
+            ambiguous: BTreeSet::new(),
         })
+    }
+
+    fn any_stage(&self, test: impl Fn(&Match) -> bool) -> bool {
+        self.stages
+            .iter()
+            .any(|s| !s.external && !s.matcher.is_empty() && test(&s.matcher))
+    }
+
+    fn comm_is_wanted(&self, comm: &[u8]) -> bool {
+        self.comms.contains(comm)
+            || (comm.starts_with(b"irq/") && self.any_stage(|m| !m.irq.is_empty()))
+    }
+
+    /// Whether an event can change what a matched stage finds, so the next pass has to walk /proc.
+    pub fn matters(&self, event: &Event) -> bool {
+        match event {
+            Event::Fork { pid, tid } => {
+                let task = self.roots.proc.join(pid.to_string()).join("task");
+                self.comm_is_wanted(&first_line(&task.join(tid.to_string()).join("comm")))
+            }
+            Event::Exec { pid } => {
+                self.any_stage(|m| !m.arg.is_empty())
+                    || self.comm_is_wanted(&first_line(
+                        &self.roots.proc.join(pid.to_string()).join("comm"),
+                    ))
+            }
+            Event::Comm { comm } => self.comm_is_wanted(comm),
+            Event::Exit { tid } => {
+                !self.ambiguous.is_empty() || self.owned.values().any(|o| o.tid == *tid)
+            }
+        }
     }
 
     /// One pass. Returns what changed since the last pass, one line each.
     pub fn pass(&mut self) -> Vec<String> {
+        self.pass_over(true)
+    }
+
+    /// A pass that keeps the threads it holds and looks for none: for when no event says the
+    /// matched threads changed. A held thread that has gone still makes it a whole pass.
+    pub fn pass_quiet(&mut self) -> Vec<String> {
+        let gone = self
+            .owned
+            .values()
+            .any(|o| ffi::task_starttime(o.pid, o.tid) != o.start);
+        self.pass_over(gone)
+    }
+
+    fn pass_over(&mut self, walk: bool) -> Vec<String> {
         let mut out = Vec::new();
         let held = ffi::held_stages();
         self.moved
@@ -166,7 +224,7 @@ impl Reconciler {
             if st.matcher.is_empty() {
                 self.watch_bound(index, st, &held, &mut out);
             } else {
-                self.set_matched(index, st, &mut out);
+                self.set_matched(index, st, walk, &mut out);
             }
         }
         let mine: Vec<Binding> = self
@@ -344,9 +402,21 @@ impl Reconciler {
         }
     }
 
-    fn set_matched(&mut self, index: usize, st: &Stage, out: &mut Vec<String>) {
+    fn set_matched(&mut self, index: usize, st: &Stage, walk: bool, out: &mut Vec<String>) {
         let key = &st.key;
-        let (pid, tid) = match find_threads(&st.matcher, &self.roots)[..] {
+        let found = if walk {
+            find_threads(&st.matcher, &self.roots)
+        } else if let Some(o) = self.owned.get(key) {
+            vec![(o.pid, o.tid)]
+        } else {
+            return;
+        };
+        if found.len() > 1 {
+            self.ambiguous.insert(key.clone());
+        } else {
+            self.ambiguous.remove(key);
+        }
+        let (pid, tid) = match found[..] {
             [] => {
                 self.release(key, out);
                 return self.note(out, key, "no thread matches".into());

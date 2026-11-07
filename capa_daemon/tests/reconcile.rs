@@ -15,6 +15,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use capad::ffi::{self, Match};
+use capad::procevents::{Event, ProcEvents};
 use capad::reconcile::{Reconciler, Roots, find_threads};
 
 fn serial() -> MutexGuard<'static, ()> {
@@ -717,4 +718,87 @@ fn a_restart_reads_the_state_file_of_the_previous_format() {
     let lines = next.restore();
     assert!(contains(&lines, "put back"), "{lines:?}");
     assert_eq!(ffi::observe(t.tid).unwrap().cpus, original.cpus);
+}
+
+#[test]
+fn a_quiet_pass_looks_for_nothing_until_an_event_matters() {
+    let _serial = serial();
+    let all = cpus();
+    let f = SpecFile::new(&match_spec("capad_t_quiet", *all.last().unwrap()));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let target = Target::new("capad_t_quiet");
+    assert!(rec.pass_quiet().is_empty());
+    assert!(!contains(&rec.pass(), "no thread matches"));
+    assert!(rec.matters(&Event::Comm {
+        comm: b"capad_t_quiet".to_vec()
+    }));
+    assert!(!rec.matters(&Event::Comm {
+        comm: b"unrelated".to_vec()
+    }));
+    assert!(rec.matters(&Event::Exit { tid: target.tid }));
+    assert!(!rec.matters(&Event::Exit { tid: -1 }));
+    let twin = Target::new("capad_t_quiet");
+    rec.pass();
+    assert!(
+        rec.matters(&Event::Exit { tid: -1 }),
+        "one exit can settle two matches"
+    );
+    drop(twin);
+    assert!(rec.matters(&Event::Fork {
+        pid: i32::try_from(std::process::id()).unwrap(),
+        tid: target.tid
+    }));
+    rec.restore();
+}
+
+#[test]
+fn a_quiet_pass_notices_a_held_thread_is_gone() {
+    let _serial = serial();
+    let all = cpus();
+    let f = SpecFile::new(&match_spec("capad_t_gone", *all.last().unwrap()));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let target = Target::new("capad_t_gone");
+    rec.pass();
+    drop(target);
+    let lines = rec.pass_quiet();
+    assert!(contains(&lines, "thread gone"), "{lines:?}");
+}
+
+#[test]
+fn a_quiet_pass_puts_back_a_held_thread_that_drifted() {
+    let _serial = serial();
+    let all = cpus();
+    if all.len() < 2 {
+        eprintln!("skipped: capa-cap:two-cpus needs a cpu to drift to");
+        return;
+    }
+    let last = *all.last().unwrap();
+    let f = SpecFile::new(&match_spec("capad_t_quiet_d", last));
+    let mut rec = Reconciler::load(&f.path).unwrap();
+    let target = Target::new("capad_t_quiet_d");
+    rec.pass();
+    assert_eq!(ffi::observe(target.tid).unwrap().cpus, vec![last]);
+    ffi::move_to(target.tid, &[all[0]]).unwrap();
+    rec.pass_quiet();
+    assert_eq!(ffi::observe(target.tid).unwrap().cpus, vec![last]);
+    rec.restore();
+}
+
+#[test]
+fn the_kernel_reports_a_named_thread() {
+    let _serial = serial();
+    let events = match ProcEvents::open() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("no process events here: {e}");
+            return;
+        }
+    };
+    let all = cpus();
+    let f = SpecFile::new(&match_spec("capad_t_event", *all.last().unwrap()));
+    let rec = Reconciler::load(&f.path).unwrap();
+    let target = Target::new("capad_t_other");
+    target.rename("capad_t_event");
+    thread::sleep(Duration::from_millis(100));
+    assert!(events.drain(|e| rec.matters(e)).unwrap());
 }

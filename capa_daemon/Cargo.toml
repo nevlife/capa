@@ -20,7 +20,8 @@ libc = "0.2"
 [build-dependencies]
 cxx-build = "1"
 
-# Unsafe code is refused except where a module allows it: the bridge and the signal mask.
+# Unsafe code is refused except where a module allows it: the bridge, the signal mask and the
+# process events socket.
 [lints.rust]
 unsafe_code = "deny"
 
