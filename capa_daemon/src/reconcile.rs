@@ -59,21 +59,55 @@ fn comm_of(name: &str) -> &[u8] {
     &name.as_bytes()[..name.len().min(15)]
 }
 
-/// Whether one NUL-separated element of a cmdline file is exactly `arg`.
-fn has_arg(path: &Path, arg: &str) -> bool {
-    let cmdline = fs::read(path).unwrap_or_default();
-    cmdline.split(|&b| b == 0).any(|a| a == arg.as_bytes())
-}
-
 fn at(pid: i32, tid: i32) -> String {
     format!("pid {pid} tid {tid}")
 }
 
+/// One reading of /proc for one pass, however many stages look in it.
+struct Snapshot {
+    pids: Vec<i32>,
+    by_comm: BTreeMap<Vec<u8>, Vec<i32>>,
+    cmdlines: BTreeMap<i32, Vec<u8>>,
+}
+
+impl Snapshot {
+    fn read(roots: &Roots, cmdlines: bool) -> Self {
+        let mut snapshot = Self {
+            pids: numeric_entries(&roots.proc),
+            by_comm: BTreeMap::new(),
+            cmdlines: BTreeMap::new(),
+        };
+        for &pid in &snapshot.pids {
+            let dir = roots.proc.join(pid.to_string());
+            let comm = first_line(&dir.join("comm"));
+            snapshot.by_comm.entry(comm).or_default().push(pid);
+            if cmdlines {
+                let line = fs::read(dir.join("cmdline")).unwrap_or_default();
+                snapshot.cmdlines.insert(pid, line);
+            }
+        }
+        snapshot
+    }
+
+    fn named(&self, comm: &[u8]) -> &[i32] {
+        self.by_comm.get(comm).map_or(&[], Vec::as_slice)
+    }
+
+    fn has_arg(&self, pid: i32, arg: &str) -> bool {
+        self.cmdlines
+            .get(&pid)
+            .is_some_and(|c| c.split(|&b| b == 0).any(|a| a == arg.as_bytes()))
+    }
+}
+
 /// Every (pid, tid) a matched stage names. The daemon sets a stage only when this is exactly one.
 pub fn find_threads(m: &Match, roots: &Roots) -> Vec<(i32, i32)> {
+    find_in(&Snapshot::read(roots, !m.arg.is_empty()), m, roots)
+}
+
+fn find_in(snapshot: &Snapshot, m: &Match, roots: &Roots) -> Vec<(i32, i32)> {
     let mut out = Vec::new();
     if !m.irq.is_empty() {
-        let procs = numeric_entries(&roots.proc);
         for irq in numeric_entries(&roots.sys_irq) {
             let actions = first_line(&roots.sys_irq.join(irq.to_string()).join("actions"));
             if !actions.split(|&b| b == b',').any(|h| h == m.irq.as_bytes()) {
@@ -83,24 +117,25 @@ pub fn find_threads(m: &Match, roots: &Roots) -> Vec<(i32, i32)> {
             // whole name in comm; older ones cut it to 15 bytes like any thread. irq/<n>-s-<name>
             // is a secondary thread of the same handler and matches neither.
             let want = format!("irq/{irq}-{}", m.irq);
-            for &pid in &procs {
-                let comm = first_line(&roots.proc.join(pid.to_string()).join("comm"));
-                if comm == want.as_bytes() || comm == comm_of(&want) {
-                    out.push((pid, pid));
-                }
+            let mut pids = snapshot.named(want.as_bytes()).to_vec();
+            if want.len() > comm_of(&want).len() {
+                pids.extend_from_slice(snapshot.named(comm_of(&want)));
             }
+            pids.sort_unstable();
+            out.extend(pids.into_iter().map(|pid| (pid, pid)));
         }
         return out;
     }
-    for pid in numeric_entries(&roots.proc) {
-        let dir = roots.proc.join(pid.to_string());
-        if !m.process.is_empty() && first_line(&dir.join("comm")) != comm_of(&m.process) {
+    let candidates = if m.process.is_empty() {
+        &snapshot.pids[..]
+    } else {
+        snapshot.named(comm_of(&m.process))
+    };
+    for &pid in candidates {
+        if !m.arg.is_empty() && !snapshot.has_arg(pid, &m.arg) {
             continue;
         }
-        if !m.arg.is_empty() && !has_arg(&dir.join("cmdline"), &m.arg) {
-            continue;
-        }
-        let tasks = dir.join("task");
+        let tasks = roots.proc.join(pid.to_string()).join("task");
         for tid in numeric_entries(&tasks) {
             if first_line(&tasks.join(tid.to_string()).join("comm")) == comm_of(&m.thread) {
                 out.push((pid, tid));
@@ -214,6 +249,10 @@ impl Reconciler {
 
     fn pass_over(&mut self, walk: bool) -> Vec<String> {
         let mut out = Vec::new();
+        let snapshot = walk.then(|| {
+            let cmdlines = self.any_stage(|m| !m.arg.is_empty());
+            Snapshot::read(&self.roots, cmdlines)
+        });
         let held = ffi::held_stages();
         self.moved
             .retain(|task, m| ffi::task_starttime(m.pid, task.tid) == task.start);
@@ -224,7 +263,7 @@ impl Reconciler {
             if st.matcher.is_empty() {
                 self.watch_bound(index, st, &held, &mut out);
             } else {
-                self.set_matched(index, st, walk, &mut out);
+                self.set_matched(index, st, snapshot.as_ref(), &mut out);
             }
         }
         let mine: Vec<Binding> = self
@@ -402,10 +441,16 @@ impl Reconciler {
         }
     }
 
-    fn set_matched(&mut self, index: usize, st: &Stage, walk: bool, out: &mut Vec<String>) {
+    fn set_matched(
+        &mut self,
+        index: usize,
+        st: &Stage,
+        snapshot: Option<&Snapshot>,
+        out: &mut Vec<String>,
+    ) {
         let key = &st.key;
-        let found = if walk {
-            find_threads(&st.matcher, &self.roots)
+        let found = if let Some(s) = snapshot {
+            find_in(s, &st.matcher, &self.roots)
         } else if let Some(o) = self.owned.get(key) {
             vec![(o.pid, o.tid)]
         } else {
