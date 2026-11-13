@@ -3,12 +3,14 @@
 
 #include <gtest/gtest.h>
 #include <pthread.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <future>
 #include <stdexcept>
@@ -1028,11 +1030,15 @@ chains:
   std::atomic<bool> stop{false};
   std::thread t([&] {
     tid.set_value(capa::this_tid());
+    // mmap, not a vector: glibc keeps a freed 1 MiB block and hands it back already faulted in.
+    constexpr std::size_t kBytes = 1 << 20;
     while (!stop) {
-      std::vector<char> fresh(1 << 20);
-      for (std::size_t i = 0; i < fresh.size(); i += 4096) {
-        fresh[i] = 1;
+      void * p = mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      if (p == MAP_FAILED) {
+        return;
       }
+      std::memset(p, 1, kBytes);
+      munmap(p, kBytes);
       std::this_thread::yield();
     }
   });
@@ -1044,6 +1050,8 @@ chains:
   EXPECT_EQ(now.find("pi-boosted")->verdict, capa::Verdict::Ok);
   ASSERT_NE(now.find("timerslack"), nullptr) << "another thread's needs CAP_SYS_NICE, so Unknown";
 
+  // Past the worker's first allocations, so the window sees only what each loop does.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   const auto window = capa::verify(stage, worker, std::chrono::milliseconds(200));
   stop = true;
   t.join();
