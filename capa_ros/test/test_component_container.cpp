@@ -30,7 +30,7 @@ using namespace std::chrono_literals;
 using composition_interfaces::srv::LoadNode;
 
 template <class P>
-bool eventually(P done, std::chrono::milliseconds limit = 10000ms)
+auto eventually(P done, std::chrono::milliseconds limit = 10000ms) -> bool
 {
   const auto end = std::chrono::steady_clock::now() + limit;
   while (!done()) {
@@ -62,7 +62,7 @@ void capture(
   ros_handler(where, severity, name, stamp, format, args);
 }
 
-std::vector<std::string> logged(const std::string & part)
+auto logged(const std::string & part) -> std::vector<std::string>
 {
   const std::lock_guard<std::mutex> lk(log_m);
   std::vector<std::string> out;
@@ -81,8 +81,8 @@ class Manager : public capa::ComponentManager
 public:
   explicit Manager(const std::string & name) : capa::ComponentManager(name) {}
 
-  std::vector<ComponentResource> get_component_resources(
-    const std::string & package, const std::string &) const override
+  auto get_component_resources(const std::string & package, const std::string &) const
+    -> std::vector<ComponentResource> override
   {
     if (package != "capa_ros_test") {
       return {};
@@ -90,7 +90,7 @@ public:
     return {{"capa_ros_test::Planner", CAPA_TEST_COMPONENTS}};
   }
 
-  std::map<std::string, std::vector<std::uint32_t>> started()
+  auto started() -> std::map<std::string, std::vector<std::uint32_t>>
   {
     const std::lock_guard<std::mutex> lk(m_);
     return started_;
@@ -166,7 +166,7 @@ protected:
     log_lines.clear();
   }
 
-  std::shared_future<LoadNode::Response::SharedPtr> load_planner()
+  auto load_planner() -> std::shared_future<LoadNode::Response::SharedPtr>
   {
     auto request = std::make_shared<LoadNode::Request>();
     request->package_name = "capa_ros_test";
@@ -174,7 +174,8 @@ protected:
     return load_->async_send_request(request).future.share();
   }
 
-  LoadNode::Response::SharedPtr wait(const std::shared_future<LoadNode::Response::SharedPtr> & f)
+  auto wait(const std::shared_future<LoadNode::Response::SharedPtr> & f)
+    -> LoadNode::Response::SharedPtr
   {
     rclcpp::executors::SingleThreadedExecutor ex;
     ex.add_node(client_);
@@ -182,12 +183,16 @@ protected:
     return f.get();
   }
 
-  std::string error()
+  auto error() -> std::string
   {
     const std::lock_guard<std::mutex> lk(log_m);
     return error_;
   }
 
+  [[nodiscard]] auto manager() const -> Manager & { return *manager_; }
+  [[nodiscard]] auto done() const -> bool { return done_.load(); }
+
+private:
   std::string path_;
   std::shared_ptr<Manager> manager_;
   std::thread spinner_;
@@ -197,7 +202,7 @@ protected:
   rclcpp::Client<LoadNode>::SharedPtr load_;
 };
 
-std::string cpu(std::uint32_t c)
+auto cpu(std::uint32_t c) -> std::string
 {
   return "[" + std::to_string(c) + "]";
 }
@@ -234,8 +239,8 @@ TEST_F(Container, BindsTheDeclaredGroupsAndWarnsOfStagesThatBindNothing)
     cpu(all[4]) + "}\n");
 
   ASSERT_TRUE(wait(load_planner())->success);
-  ASSERT_TRUE(eventually([&] { return manager_->started().size() == 4; }));
-  const auto started = manager_->started();
+  ASSERT_TRUE(eventually([&] { return manager().started().size() == 4; }));
+  const auto started = manager().started();
   EXPECT_EQ(started.at("/capa_ct/odom"), std::vector<std::uint32_t>{all[0]});
   EXPECT_EQ(started.at("/capa_ct/traj"), std::vector<std::uint32_t>{all[1]});
   EXPECT_EQ(started.at("/capa_ct/frames"), std::vector<std::uint32_t>{all[2]});
@@ -267,7 +272,7 @@ TEST_F(Container, ARefusedStageStopsTheContainer)
     "priority: 10}\n");
 
   load_planner();
-  ASSERT_TRUE(eventually([&] { return done_.load(); }));
+  ASSERT_TRUE(eventually([&] { return done(); }));
   EXPECT_NE(error().find("capa: stage /planner/traj"), std::string::npos) << error();
 }
 

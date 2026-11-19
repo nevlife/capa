@@ -24,14 +24,14 @@ public:
     odom_(subscribe("/capa_ct/odom", nullptr)),
     traj_(subscribe("/capa_ct/traj", traj_group_)),
     map_(subscribe("/capa_ct/map", map_group_)),
-    frames_(*this, "/capa_ct/frames", flux::kNoSchema, flux::QoS{}, [](const flux::FrameView &) {})
+    frames_(*this, "/capa_ct/frames", flux::QoS{}, [](const flux::Frame &) {}, {})
   {
     frames_.add_to_callback_group(*this, frames_group_);
   }
 
 private:
-  rclcpp::Subscription<std_msgs::msg::UInt64>::SharedPtr subscribe(
-    const std::string & topic, const rclcpp::CallbackGroup::SharedPtr & group)
+  auto subscribe(const std::string & topic, const rclcpp::CallbackGroup::SharedPtr & group)
+    -> rclcpp::Subscription<std_msgs::msg::UInt64>::SharedPtr
   {
     rclcpp::SubscriptionOptions o;
     o.callback_group = group;

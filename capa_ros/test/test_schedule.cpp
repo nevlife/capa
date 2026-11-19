@@ -174,7 +174,7 @@ TEST(Schedule, ScheduleRejects)
   auto stray_node = std::make_shared<rclcpp::Node>("cie_sched_stray");
   auto stray = stray_node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   must(capa::flux::apply_checked(ex, *stray_node, stray, capa::Options{}));
-  EXPECT_THROW(ex.spin(), std::invalid_argument);
+  EXPECT_THROW(ex.spin(), flux::Error);
 
   flux::PartitionedExecutor ex2;
   ex2.add_node(node);
@@ -239,9 +239,9 @@ public:
     out << body;
   }
   SpecFile(const SpecFile &) = delete;
-  SpecFile & operator=(const SpecFile &) = delete;
+  auto operator=(const SpecFile &) -> SpecFile & = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
-  const std::string & path() const { return path_; }
+  [[nodiscard]] auto path() const -> const std::string & { return path_; }
 
 private:
   static int counter_;
@@ -250,7 +250,7 @@ private:
 int SpecFile::counter_ = 0;
 
 template <typename F>
-std::string refusal(F && call)
+auto refusal(F && call) -> std::string
 {
   const auto r = std::forward<F>(call)();
   if (r) {
@@ -407,7 +407,7 @@ chains:
         cpus: [LAST]
 )";
 
-std::string holds_spec(std::uint32_t first, std::uint32_t last)
+auto holds_spec(std::uint32_t first, std::uint32_t last) -> std::string
 {
   std::string s = kHoldsSpec;
   s.replace(s.find("FIRST"), 5, std::to_string(first));
@@ -437,7 +437,7 @@ struct Holder
     subscribe("/cie_holds/traj", traj, seen_traj, traj_cpus);
   }
 
-  static rclcpp::SubscriptionOptions options(const rclcpp::CallbackGroup::SharedPtr & g)
+  static auto options(const rclcpp::CallbackGroup::SharedPtr & g) -> rclcpp::SubscriptionOptions
   {
     rclcpp::SubscriptionOptions o;
     o.callback_group = g;
@@ -499,8 +499,7 @@ TEST(Container, ContentListsAFluxSubscriptionInTheGroup)
   {
     auto node = std::make_shared<rclcpp::Node>("cie_flux_holds");
     auto g = node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-    flux::Subscription sub(
-      *node, "frames", flux::kNoSchema, flux::QoS{}, [](const flux::FrameView &) {});
+    flux::Subscription sub(*node, "frames", flux::QoS{}, [](const flux::Frame &) {}, {});
     sub.add_to_callback_group(*node, g);
     auto & base = *node->get_node_base_interface();
     EXPECT_EQ(capa::flux::content(base, g).subscriptions, std::vector<std::string>{"/frames"});

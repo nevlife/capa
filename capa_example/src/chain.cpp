@@ -20,9 +20,9 @@ public:
   StageNode()
   : Node("capa_stage"),
     group_(create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
-    sub_(*this, kTopic, Image::kFingerprint, flux::QoS{}, [this](const flux::FrameView & f) {
-      on_frame(f);
-    })
+    sub_(
+      *this, kTopic, flux::QoS{}, [this](const flux::Frame & f) { on_frame(f); }, {},
+      Image::kFingerprint)
   {
     timer_ = create_wall_timer(std::chrono::seconds(1), [this]() { report(); });
   }
@@ -37,7 +37,7 @@ private:
 
   static constexpr const char * kTopic = "image";
 
-  void on_frame(const flux::FrameView & f)
+  void on_frame(const flux::Frame & f)
   {
     Image::View v{f};
     if (v.ok__()) {

@@ -45,9 +45,9 @@ public:
     out << body;
   }
   SpecFile(const SpecFile &) = delete;
-  SpecFile & operator=(const SpecFile &) = delete;
+  auto operator=(const SpecFile &) -> SpecFile & = delete;
   ~SpecFile() { std::remove(path_.c_str()); }
-  const std::string & path() const { return path_; }
+  [[nodiscard]] auto path() const -> const std::string & { return path_; }
 
 private:
   static int counter_;

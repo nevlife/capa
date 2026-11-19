@@ -17,8 +17,9 @@ namespace detail
 
 // An rclcpp callback group has no name and does not know its node, so the pairing at this call
 // is the only link between the file's (node, label) and a thread. It is checked here.
-Result<rclcpp::CallbackGroup::SharedPtr> owned_group(
-  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const char * caller)
+auto owned_group(
+  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
+  const char * caller) -> Result<rclcpp::CallbackGroup::SharedPtr>
 {
   const auto base = node.get_node_base_interface();
   if (!group) {
@@ -36,8 +37,9 @@ Result<rclcpp::CallbackGroup::SharedPtr> owned_group(
   return group;
 }
 
-Result<rclcpp::CallbackGroup::SharedPtr> stage_group(
-  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage)
+auto stage_group(
+  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
+  const Stage & stage) -> Result<rclcpp::CallbackGroup::SharedPtr>
 {
   if (auto r = capa::detail::reject_external(stage, "flux::apply_checked()"); !r) {
     return r.error();
@@ -53,7 +55,7 @@ Result<rclcpp::CallbackGroup::SharedPtr> stage_group(
   if (!owned) {
     return owned;
   }
-  const auto g = *std::move(owned);
+  auto g = *std::move(owned);
   if (!stage.holds.empty()) {
     const GroupContent c = content(*node.get_node_base_interface(), g);
     const auto & names = stage.holds.subscription.empty() ? c.services : c.subscriptions;
@@ -87,8 +89,8 @@ Result<rclcpp::CallbackGroup::SharedPtr> stage_group(
 namespace
 {
 
-std::vector<rclcpp::CallbackGroup::SharedPtr> groups_of(
-  rclcpp::node_interfaces::NodeBaseInterface & node)
+auto groups_of(rclcpp::node_interfaces::NodeBaseInterface & node)
+  -> std::vector<rclcpp::CallbackGroup::SharedPtr>
 {
   std::vector<rclcpp::CallbackGroup::SharedPtr> out;
   node.for_each_callback_group(
@@ -96,9 +98,10 @@ std::vector<rclcpp::CallbackGroup::SharedPtr> groups_of(
   return out;
 }
 
-Result<std::vector<const Stage *>> resolve(
+auto resolve(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
   const std::vector<rclcpp::CallbackGroup::SharedPtr> & groups)
+  -> Result<std::vector<const Stage *>>
 {
   std::vector<GroupContent> contents;
   contents.reserve(groups.size());
@@ -110,8 +113,8 @@ Result<std::vector<const Stage *>> resolve(
 
 }  // namespace
 
-Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>> declared_groups(
-  const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
+auto declared_groups(const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
+  -> Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>>
 {
   const auto groups = groups_of(node);
   const auto resolved = resolve(spec, node, groups);
@@ -130,8 +133,9 @@ Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>> 
 
 }  // namespace detail
 
-GroupContent content(
-  rclcpp::node_interfaces::NodeBaseInterface & node, const rclcpp::CallbackGroup::SharedPtr & group)
+auto content(
+  rclcpp::node_interfaces::NodeBaseInterface & node,
+  const rclcpp::CallbackGroup::SharedPtr & group) -> GroupContent
 {
   const auto g = group ? group : node.get_default_callback_group();
   GroupContent c;
@@ -156,9 +160,9 @@ GroupContent content(
   return c;
 }
 
-Result<const Stage *> declared(
+auto declared(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
-  const rclcpp::CallbackGroup::SharedPtr & group)
+  const rclcpp::CallbackGroup::SharedPtr & group) -> Result<const Stage *>
 {
   const auto g = group ? group : node.get_default_callback_group();
   const auto groups = detail::groups_of(node);

@@ -4,6 +4,7 @@
 #include "capa/rt.hpp"
 #include "capa/spec.hpp"
 
+#include <flux/channel.hpp>
 #include <rclcpp/node.hpp>
 
 #include <exception>
@@ -22,22 +23,28 @@ namespace capa::flux
 namespace detail
 {
 
-Result<rclcpp::CallbackGroup::SharedPtr> owned_group(
-  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const char * caller);
+auto owned_group(
+  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
+  const char * caller) -> Result<rclcpp::CallbackGroup::SharedPtr>;
 
-Result<rclcpp::CallbackGroup::SharedPtr> stage_group(
-  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group, const Stage & stage);
+auto stage_group(
+  rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
+  const Stage & stage) -> Result<rclcpp::CallbackGroup::SharedPtr>;
 
 // Every callback group of `node` the file declares, with its stage (Spec::declared).
-Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>> declared_groups(
-  const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node);
+auto declared_groups(const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
+  -> Result<std::vector<std::pair<rclcpp::CallbackGroup::SharedPtr, const Stage *>>>;
 
 // Registers `hook` for `group`. flux refuses a group that already has one by throwing.
 template <class Executor, class Hook>
-Result<void> on_start(Executor & ex, const rclcpp::CallbackGroup::SharedPtr & group, Hook && hook)
+auto on_start(Executor & ex, const rclcpp::CallbackGroup::SharedPtr & group, Hook && hook)
+  -> Result<void>
 {
   try {
     ex.on_thread_start(group, std::forward<Hook>(hook));
+  } catch (const ::flux::Error & e) {
+    const bool caller = e.status() == ::flux::Status::InvalidArgument;
+    return Error{caller ? ErrorKind::InvalidArgument : ErrorKind::Failed, e.what()};
   } catch (const std::logic_error & e) {
     return Error{ErrorKind::InvalidArgument, e.what()};
   } catch (const std::exception & e) {
@@ -51,20 +58,21 @@ Result<void> on_start(Executor & ex, const rclcpp::CallbackGroup::SharedPtr & gr
 // What `group` (nullptr: the default one) of `node` holds, flux::Subscription objects included. A
 // caller with an agnocast subscription or a flux message_filters::Subscriber adds its topic and
 // calls Spec::declared().
-GroupContent content(
+auto content(
   rclcpp::node_interfaces::NodeBaseInterface & node,
-  const rclcpp::CallbackGroup::SharedPtr & group);
+  const rclcpp::CallbackGroup::SharedPtr & group) -> GroupContent;
 
 // The stage `spec` declares for `group` (nullptr: the default one) of `node`, or nullptr. For an
 // executor that does not take hooks: call it on the group's thread and apply_checked() the result.
-Result<const Stage *> declared(
+auto declared(
   const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node,
-  const rclcpp::CallbackGroup::SharedPtr & group);
+  const rclcpp::CallbackGroup::SharedPtr & group) -> Result<const Stage *>;
 
 template <class Executor>
-Result<void> apply_checked(
+auto apply_checked(
   Executor & ex, rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
-  const Options & opts, Strictness strict = Strictness::Soft, int control_priority = 0)
+  const Options & opts, Strictness strict = Strictness::Soft,
+  int control_priority = 0) -> Result<void>
 {
   if (auto valid = opts.validate(); !valid) {
     return valid;
@@ -79,9 +87,9 @@ Result<void> apply_checked(
 }
 
 template <class Executor>
-Result<void> apply_checked(
+auto apply_checked(
   Executor & ex, rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
-  const Stage & stage)
+  const Stage & stage) -> Result<void>
 {
   auto owned = detail::stage_group(node, group, stage);
   if (!owned) {
@@ -93,9 +101,9 @@ Result<void> apply_checked(
 
 // The stage is looked up here, so a typo is an error now rather than at spin().
 template <class Executor>
-Result<void> bind(
+auto bind(
   Executor & ex, rclcpp::Node & node, const rclcpp::CallbackGroup::SharedPtr & group,
-  const std::string & label = "")
+  const std::string & label = "") -> Result<void>
 {
   const auto spec = Spec::load();
   if (!spec) {
@@ -115,7 +123,7 @@ Result<void> bind(
 // nodes it knows nothing about: one call per node, before spin(). Groups created later are not
 // seen, and a stage named by label alone is left to bind().
 template <class Executor>
-Result<void> bind_declared(Executor & ex, rclcpp::node_interfaces::NodeBaseInterface & node)
+auto bind_declared(Executor & ex, rclcpp::node_interfaces::NodeBaseInterface & node) -> Result<void>
 {
   const auto spec = Spec::load();
   if (!spec) {

@@ -60,8 +60,8 @@ void ComponentManager::on_thread_start(
     get_logger(), "capa: stage %s bound to thread %d%s", name.c_str(), this_tid(), warned.c_str());
 }
 
-std::vector<std::string> unbound_stages(
-  const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
+auto unbound_stages(const Spec & spec, rclcpp::node_interfaces::NodeBaseInterface & node)
+  -> std::vector<std::string>
 {
   const std::string fqn = node.get_fully_qualified_name();
   std::vector<const Stage *> bound;

@@ -80,7 +80,7 @@ def test_a_group_child_runs_where_it_was_declared(node):
         assert seen, "the callback never ran"
         assert seen[0] == [target]
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -130,7 +130,7 @@ def test_a_stage_reaches_the_group_child(node, tmp_path):
         assert seen, "the callback never ran"
         assert seen[0] == [target]
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -154,7 +154,7 @@ def test_a_node_child_runs_where_it_was_declared(node):
         assert seen, "the timer never fired"
         assert seen[0] == [target]
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -200,7 +200,7 @@ def test_two_groups_get_the_cpus_each_declared(node):
         assert seen == {0: [left], 1: [right]}
         assert capa.current().cpus == parent_before
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -239,7 +239,7 @@ def test_declaring_after_spin_started_is_refused(node):
         with pytest.raises(RuntimeError, match="while spinning"):
             capa.flux.apply_checked(ex, node, group, capa.Options(cpus=[spare_cpus[0]]))
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
         del pub
 
@@ -288,7 +288,7 @@ def test_a_granted_policy_reaches_the_child(node):
         assert seen[0].policy == os.SCHED_FIFO
         assert seen[0].priority == 5
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -322,7 +322,7 @@ def test_bind_reaches_the_group_child(node, tmp_path, monkeypatch):
         assert seen, "the callback never ran"
         assert seen[0] == [target]
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
@@ -402,7 +402,7 @@ def test_bind_declared_reaches_the_node_unit(node, tmp_path, monkeypatch):
         assert seen, "the subscription never ran"
         assert seen[0] == [target]
     finally:
-        ex.stop()
+        ex.cancel()
         t.join(timeout=10.0)
 
 
