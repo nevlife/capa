@@ -77,6 +77,7 @@ C++와 Python이 함께 약속하는 것을 한 행에 하나씩 적고, 그 약
 | X-027 | flux bind_declared는 구독을 가진 그룹을 맡은 스레드에 stage를 적용한다 | `Container.BindDeclaredReachesTheGroupThatHoldsTheSubscription` | `test_bind_declared_reaches_the_node_unit` |
 | X-028 | match의 arg는 cmdline 원소 하나와 정확히 같아야 한다 | `Spec.AMatchNamesAnInterruptOrAProcessAndThread` | `test_a_match_names_a_process_by_one_argument` |
 | X-029 | 권한이 없으면 bind는 capad에 요청하고 최대 5 s 기다린다. capad가 적용하지 않으면 거절한다 | `Bind.WithoutPermissionTheThreadAsksCapadAndIsRefusedWithoutAnAnswer` | `test_bind_without_permission_asks_capad_and_is_refused_without_an_answer` |
+| X-030 | 체인은 맨 위 `capa` 아래 `chains`에서 읽고, 맨 위 `orma`는 읽지 않고 건너뛴다. 맨 위가 `chains`인 v2 파일은 옮기라는 오류로 거절한다 | `Spec.ChainsSitUnderCapaBesideOrmasRules` | `test_chains_sit_under_capa_beside_ormas_rules` |
 
 ### 2. 의도한 차이
 

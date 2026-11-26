@@ -535,13 +535,24 @@ auto Spec::load(const std::string & path) -> Result<Spec>
   std::vector<Chain> chains;
   std::vector<int> crit;
   try {
-    if (auto r = reject_unknown_keys(root, {"chains"}, "the file root"); !r) {
+    if (root["chains"]) {
+      return fail("'" + path + "': chains moved under capa: (capa: {chains: ...})");
+    }
+    // orma's diagnostic rules may share the file under `orma`; capa does not read them.
+    if (auto r = reject_unknown_keys(root, {"capa", "orma"}, "the file root"); !r) {
       return r.error();
     }
-    if (!root["chains"] || !root["chains"].IsMap()) {
-      return fail("'" + path + "' has no chains mapping");
+    const YAML::Node capa = root["capa"];
+    if (!capa || !capa.IsMap()) {
+      return fail("'" + path + "' has no capa mapping");
     }
-    for (const auto & kv : root["chains"]) {
+    if (auto r = reject_unknown_keys(capa, {"chains"}, "capa"); !r) {
+      return r.error();
+    }
+    if (!capa["chains"] || !capa["chains"].IsMap()) {
+      return fail("'" + path + "' has no capa.chains mapping");
+    }
+    for (const auto & kv : capa["chains"]) {
       Chain chain{kv.first.as<std::string>(), {}};
       const YAML::Node & body = kv.second;
       if (!body.IsMap()) {

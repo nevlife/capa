@@ -41,23 +41,24 @@ group을 맡은 자식 스레드는 첫 콜백 전에 stage를 자기에게 적�
 파일은 `config/perception_to_control.yaml`이다.
 
 ```yaml
-chains:
-  perception_to_control:
-    target: soft
-    stages:
-      - node: /flux_loan_image_pub
-        external: true
-        expect_priority: 0
-      - node: /capa_stage
-        group: work
-        policy: fifo
-        priority: 70
-        cpus: [2]
-      - node: /flux_control
-        group: loop
-        policy: fifo
-        priority: 90
-        cpus: [3]
+capa:
+  chains:
+    perception_to_control:
+      target: soft
+      stages:
+        - node: /flux_loan_image_pub
+          external: true
+          expect_priority: 0
+        - node: /capa_stage
+          group: work
+          policy: fifo
+          priority: 70
+          cpus: [2]
+        - node: /flux_control
+          group: loop
+          policy: fifo
+          priority: 90
+          cpus: [3]
 ```
 
 - `external` stage는 capa가 적용하지 않는 스레드다. capa는 이 스레드에 `verify()`만 실행한다.

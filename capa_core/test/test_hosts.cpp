@@ -218,13 +218,14 @@ TEST(Hosts, OrinJetPack6WholeFile)
 {
   const Host host("orin_jetpack6");
   const auto rep = host.preflight(R"(
-chains:
-  camera_to_control:
-    target: hard
-    stages:
-      - {name: eth_irq, kind: release, policy: fifo, priority: 85, cpus: [5], match: {irq: 2490000.ethernet}}
-      - {name: grab, policy: fifo, priority: 70, cpus: [4]}
-      - {name: control, policy: fifo, priority: 80, cpus: [8]}
+capa:
+  chains:
+    camera_to_control:
+      target: hard
+      stages:
+        - {name: eth_irq, kind: release, policy: fifo, priority: 85, cpus: [5], match: {irq: 2490000.ethernet}}
+        - {name: grab, policy: fifo, priority: 70, cpus: [4]}
+        - {name: control, policy: fifo, priority: 80, cpus: [8]}
 )");
   expect(
     rep, {
@@ -311,12 +312,13 @@ TEST(Hosts, HousekeepingFailsWhenNothingIsLeft)
 {
   const Host host("x86_rt_root");
   const auto rep = host.preflight(R"(
-chains:
-  a:
-    target: hard
-    stages:
-      - {name: one, policy: fifo, priority: 70, cpus: [0]}
-      - {name: two, policy: fifo, priority: 80, cpus: [1]}
+capa:
+  chains:
+    a:
+      target: hard
+      stages:
+        - {name: one, policy: fifo, priority: 70, cpus: [0]}
+        - {name: two, policy: fifo, priority: 80, cpus: [1]}
 )");
   expect(
     rep,
@@ -329,12 +331,13 @@ TEST(Hosts, NohzFullCpuWithTwoStagesIsWarned)
   const Host host("x86_rt_root");
   expect(
     host.preflight(R"(
-chains:
-  a:
-    target: soft
-    stages:
-      - {name: one, policy: fifo, priority: 70, cpus: [2]}
-      - {name: two, policy: fifo, priority: 80, cpus: [2]}
+capa:
+  chains:
+    a:
+      target: soft
+      stages:
+        - {name: one, policy: fifo, priority: 70, cpus: [2]}
+        - {name: two, policy: fifo, priority: 80, cpus: [2]}
 )"),
     {{"nohz-single-task", Verdict::Warn}});
 }
@@ -344,12 +347,13 @@ TEST(Hosts, SmtSiblingsHoldingTwoHardWorkersAreWarned)
   const Host host("x86_rt_root");
   expect(
     host.preflight(R"(
-chains:
-  a:
-    target: hard
-    stages:
-      - {name: one, policy: fifo, priority: 70, cpus: [0]}
-      - {name: two, policy: fifo, priority: 80, cpus: [2]}
+capa:
+  chains:
+    a:
+      target: hard
+      stages:
+        - {name: one, policy: fifo, priority: 70, cpus: [0]}
+        - {name: two, policy: fifo, priority: 80, cpus: [2]}
 )"),
     {{"smt-neighbor", Verdict::Warn}});
 }

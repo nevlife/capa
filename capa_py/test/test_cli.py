@@ -21,13 +21,13 @@ CPU = sorted(os.sched_getaffinity(0))[0]
 def spec_file(tmp_path, target="soft"):
     path = tmp_path / "chain.yaml"
     path.write_text(
-        "chains:\n"
-        "  c:\n"
-        f"    target: {target}\n"
-        "    stages:\n"
-        f"      - {{node: /cli, group: work, cpus: [{CPU}]}}\n"
-        f"      - {{node: /cli, group: idle, cpus: [{CPU}]}}\n"
-        "      - {node: /dds, group: listener, external: true, expect_priority: 0}\n"
+        "capa:\n  chains:\n"
+        "    c:\n"
+        f"      target: {target}\n"
+        "      stages:\n"
+        f"        - {{node: /cli, group: work, cpus: [{CPU}]}}\n"
+        f"        - {{node: /cli, group: idle, cpus: [{CPU}]}}\n"
+        "        - {node: /dds, group: listener, external: true, expect_priority: 0}\n"
     )
     return str(path)
 
@@ -62,7 +62,7 @@ def test_no_file_is_an_argument_error(monkeypatch, capsys):
 
 def test_a_file_that_breaks_a_rule_ends_the_command(tmp_path, capsys):
     bad = tmp_path / "bad.yaml"
-    bad.write_text("chains: {c: {target: soft, stages: [{node: /a, priorty: 3}]}}\n")
+    bad.write_text("capa:\n  chains: {c: {target: soft, stages: [{node: /a, priorty: 3}]}}\n")
     with pytest.raises(SystemExit) as e:
         main(["check", str(bad)])
     assert e.value.code == 1
@@ -121,7 +121,7 @@ def test_a_held_stage_the_file_does_not_name_is_shown(tmp_path, capsys):
     spec = spec_file(tmp_path)
     other = tmp_path / "other.yaml"
     other.write_text(
-        f"chains: {{o: {{target: soft, stages: [{{node: /elsewhere, cpus: [{CPU}]}}]}}}}\n"
+        f"capa:\n  chains: {{o: {{target: soft, stages: [{{node: /elsewhere, cpus: [{CPU}]}}]}}}}\n"
     )
     child, _ = holder(str(other), node="/elsewhere", group="")
     try:

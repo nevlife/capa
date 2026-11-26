@@ -262,15 +262,16 @@ auto refusal(F && call) -> std::string
 // Affinity only: these cases are about which thread a stage names, and applying a real RT policy
 // would need a privilege the check does not.
 constexpr const char * kLabelSpec = R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /cie_label
-        group: infer
-        cpus: [0]
-      - node: /cie_label_other
-        cpus: [0]
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /cie_label
+          group: infer
+          cpus: [0]
+        - node: /cie_label_other
+          cpus: [0]
 )";
 
 }  // namespace
@@ -395,16 +396,17 @@ namespace
 // motion_velocity_planner in miniature: the work is in a group the code never names, picked out
 // by the subscription it holds.
 constexpr const char * kHoldsSpec = R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /cie_holds
-        cpus: [FIRST]
-      - node: /cie_holds
-        group: traj
-        holds: {subscription: /cie_holds/traj}
-        cpus: [LAST]
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /cie_holds
+          cpus: [FIRST]
+        - node: /cie_holds
+          group: traj
+          holds: {subscription: /cie_holds/traj}
+          cpus: [LAST]
 )";
 
 auto holds_spec(std::uint32_t first, std::uint32_t last) -> std::string

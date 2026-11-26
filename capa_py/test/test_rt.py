@@ -74,17 +74,17 @@ def test_an_out_of_range_priority_is_rejected():
 def _spec_file(tmp_path, cpu):
     path = tmp_path / "rt_spec.yaml"
     path.write_text(
-        "chains:\n"
-        "  camera_to_control:\n"
-        "    target: soft\n"
-        "    stages:\n"
-        "      - node: /flux_rt_test\n"
-        "        group: infer\n"
-        f"        cpus: [{cpu}]\n"
-        "      - node: /control_node\n"
-        "        group: loop\n"
-        "        policy: fifo\n"
-        "        priority: 90\n"
+        "capa:\n  chains:\n"
+        "    camera_to_control:\n"
+        "      target: soft\n"
+        "      stages:\n"
+        "        - node: /flux_rt_test\n"
+        "          group: infer\n"
+        f"          cpus: [{cpu}]\n"
+        "        - node: /control_node\n"
+        "          group: loop\n"
+        "          policy: fifo\n"
+        "          priority: 90\n"
     )
     return str(path)
 
@@ -122,8 +122,8 @@ def test_bind_puts_the_calling_thread_on_its_stage(tmp_path, monkeypatch):
 def test_bind_without_permission_asks_capad_and_is_refused_without_an_answer(tmp_path, monkeypatch):
     path = tmp_path / "ask.yaml"
     path.write_text(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /ask_node\n"
-        "        policy: fifo\n        priority: 10\n"
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - node: /ask_node\n"
+        "          policy: fifo\n          priority: 10\n"
     )
     monkeypatch.setenv("CAPA_SPEC", str(path))
     opts = capa.Spec.load(str(path)).stage("/ask_node").opts
@@ -266,8 +266,8 @@ def test_one_stage_is_held_by_one_live_thread(tmp_path):
 def test_an_external_stage_is_refused(tmp_path):
     path = tmp_path / "ext.yaml"
     path.write_text(
-        "chains:\n  c:\n    target: soft\n    stages:\n"
-        "      - {node: /ext, group: listener, external: true, expect_priority: 60}\n"
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n"
+        "        - {node: /ext, group: listener, external: true, expect_priority: 60}\n"
     )
     st = capa.Spec.load(str(path)).stage("/ext", "listener")
     with pytest.raises(ValueError, match="external"):
@@ -306,9 +306,9 @@ def test_verify_sees_a_drift_away_from_the_declaration(tmp_path):
 def test_verify_process_names_only_threads_the_file_cannot_explain(tmp_path):
     path = tmp_path / "scan.yaml"
     path.write_text(
-        "chains:\n  scan:\n    target: soft\n    stages:\n"
-        "      - {node: /scan, group: worker, policy: fifo, priority: 50}\n"
-        "      - {node: /scan, group: pool, policy: fifo, priority: 60, children: inherit}\n"
+        "capa:\n  chains:\n    scan:\n      target: soft\n      stages:\n"
+        "        - {node: /scan, group: worker, policy: fifo, priority: 50}\n"
+        "        - {node: /scan, group: pool, policy: fifo, priority: 60, children: inherit}\n"
     )
     spec = capa.Spec.load(str(path))
     stop = threading.Event()
@@ -385,7 +385,7 @@ def test_another_process_sees_the_stage_a_thread_holds(tmp_path):
 def test_a_matched_stage_is_refused(tmp_path):
     path = tmp_path / "match.yaml"
     path.write_text(
-        "chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, thread: dds.recv}, "
+        "capa:\n  chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, thread: dds.recv}, "
         f"cpus: [{spare_cpus[0]}]}}]}}}}\n"
     )
     st = capa.Spec.load(str(path)).stage("rx")
@@ -400,10 +400,10 @@ def test_preflight_of_a_file_fails_a_host_left_without_housekeeping(tmp_path):
         ranges = [r.split("-") for r in f.read().strip().split(",")]
     online = [c for r in ranges for c in range(int(r[0]), int(r[-1]) + 1)]
     stages = "".join(
-        f"      - {{name: s{c}, policy: fifo, priority: 10, cpus: [{c}]}}\n" for c in online
+        f"        - {{name: s{c}, policy: fifo, priority: 10, cpus: [{c}]}}\n" for c in online
     )
     path = tmp_path / "chain.yaml"
-    path.write_text(f"chains:\n  all:\n    target: hard\n    stages:\n{stages}")
+    path.write_text(f"capa:\n  chains:\n    all:\n      target: hard\n      stages:\n{stages}")
     rep = capa.preflight(capa.Spec.load(str(path)))
     assert rep.find("housekeeping").verdict == capa.Verdict.Fail
     assert not rep.ok()
@@ -412,7 +412,7 @@ def test_preflight_of_a_file_fails_a_host_left_without_housekeeping(tmp_path):
 # A window adds counters read twice, so verify can say what happened to the thread meanwhile.
 def test_verify_with_a_window_reads_counters(tmp_path):
     path = tmp_path / "chain.yaml"
-    path.write_text("chains: {c: {target: soft, stages: [{name: me, policy: other}]}}\n")
+    path.write_text("capa:\n  chains: {c: {target: soft, stages: [{name: me, policy: other}]}}\n")
     stage = capa.Spec.load(str(path)).stage("me")
     assert capa.verify(stage, capa.this_tid()).find("thread-faults") is None
     rep = capa.verify(stage, capa.this_tid(), 0.05)
@@ -457,8 +457,19 @@ def test_bind_declared_binds_only_what_the_file_declares(tmp_path, monkeypatch):
 def test_a_match_names_a_process_by_one_argument(tmp_path):
     path = tmp_path / "arg.yaml"
     path.write_text(
-        "chains: {c: {target: soft, stages: [{name: rx, kind: release, "
+        "capa:\n  chains: {c: {target: soft, stages: [{name: rx, kind: release, "
         'match: {arg: "__node:=planning", thread: recvUC}, cpus: [0]}]}}\n'
     )
     m = capa.Spec.load(str(path)).stage("rx").match
     assert (m.process, m.arg, m.thread) == ("", "__node:=planning", "recvUC")
+
+
+# The file root holds capa's chains and orma's rules; a file from before keeps its old root.
+def test_chains_sit_under_capa_beside_ormas_rules(tmp_path):
+    path = tmp_path / "chain.yaml"
+    chain = "  chains: {c: {target: soft, stages: [{name: me, policy: other}]}}\n"
+    path.write_text("capa:\n" + chain + "orma:\n  topic_hz_min: []\n")
+    assert capa.Spec.load(str(path)).stage("me") is not None
+    path.write_text(chain[2:])
+    with pytest.raises(RuntimeError, match="chains moved under capa:"):
+        capa.Spec.load(str(path))

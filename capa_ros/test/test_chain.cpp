@@ -60,22 +60,23 @@ int SpecFile::counter_ = 0;
 // fixed core id names a different core on every machine, and pinning is already covered by
 // Schedule.ScheduleReachesTheChildThread.
 constexpr const char * kChain = R"(
-chains:
-  perception_to_control:
-    target: soft
-    stages:
-      - node: /rtchain_camera
-        group: capture
-        policy: fifo
-        priority: 10
-      - node: /rtchain_perception
-        group: infer
-        policy: fifo
-        priority: 20
-      - node: /rtchain_control
-        group: loop
-        policy: fifo
-        priority: 30
+capa:
+  chains:
+    perception_to_control:
+      target: soft
+      stages:
+        - node: /rtchain_camera
+          group: capture
+          policy: fifo
+          priority: 10
+        - node: /rtchain_perception
+          group: infer
+          policy: fifo
+          priority: 20
+        - node: /rtchain_control
+          group: loop
+          policy: fifo
+          priority: 30
 )";
 
 struct Stage
@@ -179,18 +180,19 @@ TEST(Chain, DeclaredStagesReachTheirThreads)
 TEST(Chain, AWorkerThreadAppliesItsOwnStage)
 {
   SpecFile file(R"(
-chains:
-  perception_to_control:
-    target: soft
-    stages:
-      - node: /rtchain_worker
-        group: infer_worker
-        policy: fifo
-        priority: 20
-      - node: /rtchain_ctl
-        group: loop
-        policy: fifo
-        priority: 30
+capa:
+  chains:
+    perception_to_control:
+      target: soft
+      stages:
+        - node: /rtchain_worker
+          group: infer_worker
+          policy: fifo
+          priority: 20
+        - node: /rtchain_ctl
+          group: loop
+          policy: fifo
+          priority: 30
 )");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_worker", "infer_worker");
@@ -238,8 +240,9 @@ TEST(Chain, VerifySeesADriftAwayFromTheDeclaration)
   const std::uint32_t pinned = allowed.front();
 
   SpecFile file(
-    "chains:\n  drift:\n    target: soft\n    stages:\n      - node: /rtchain_drift\n"
-    "        group: worker\n        policy: other\n        cpus: [" +
+    "capa:\n  chains:\n    drift:\n      target: soft\n      stages:\n        - node: "
+    "/rtchain_drift\n"
+    "          group: worker\n          policy: other\n          cpus: [" +
     std::to_string(pinned) + "]\n");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_drift", "worker");
@@ -297,8 +300,9 @@ TEST(Chain, VerifyReadsAffinityAsWithinTheDeclaration)
   const std::uint32_t hi = allowed[1];
 
   SpecFile file(
-    "chains:\n  within:\n    target: soft\n    stages:\n      - node: /rtchain_within\n"
-    "        group: worker\n        policy: other\n        cpus: [" +
+    "capa:\n  chains:\n    within:\n      target: soft\n      stages:\n        - node: "
+    "/rtchain_within\n"
+    "          group: worker\n          policy: other\n          cpus: [" +
     std::to_string(hi) + ", " + std::to_string(lo) + "]\n");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_within", "worker");
@@ -349,8 +353,9 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
   const std::uint32_t outside = allowed[1];
 
   SpecFile file(
-    "chains:\n  outside:\n    target: soft\n    stages:\n      - node: /rtchain_outside\n"
-    "        group: worker\n        policy: other\n        cpus: [" +
+    "capa:\n  chains:\n    outside:\n      target: soft\n      stages:\n        - node: "
+    "/rtchain_outside\n"
+    "          group: worker\n          policy: other\n          cpus: [" +
     std::to_string(declared) + "]\n");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_outside", "worker");
@@ -391,12 +396,13 @@ TEST(Chain, VerifyFailsAThreadOnACpuOutsideTheDeclaration)
 TEST(Chain, VerifyProcessNamesOnlyTheThreadsTheFileCannotExplain)
 {
   SpecFile file(R"(
-chains:
-  scan:
-    target: soft
-    stages:
-      - {node: /rtchain_scan, group: worker, policy: fifo, priority: 50}
-      - {node: /rtchain_scan, group: pool, policy: fifo, priority: 60, children: inherit}
+capa:
+  chains:
+    scan:
+      target: soft
+      stages:
+        - {node: /rtchain_scan, group: worker, policy: fifo, priority: 50}
+        - {node: /rtchain_scan, group: pool, policy: fifo, priority: 60, children: inherit}
 )");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Report perm_rep =
@@ -468,14 +474,15 @@ chains:
 TEST(Chain, AnExternalStageIsCheckedNotAssumed)
 {
   SpecFile file(R"(
-chains:
-  sensor_in:
-    target: soft
-    stages:
-      - node: /rtchain_foreign
-        group: listener
-        external: true
-        expect_priority: 60
+capa:
+  chains:
+    sensor_in:
+      target: soft
+      stages:
+        - node: /rtchain_foreign
+          group: listener
+          external: true
+          expect_priority: 60
 )");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_foreign", "listener");
@@ -544,14 +551,15 @@ chains:
 TEST(Chain, AStageWhoseThreadIsGoneIsAFailureNotASilence)
 {
   SpecFile file(R"(
-chains:
-  gone:
-    target: soft
-    stages:
-      - node: /rtchain_gone
-        group: worker
-        policy: fifo
-        priority: 20
+capa:
+  chains:
+    gone:
+      target: soft
+      stages:
+        - node: /rtchain_gone
+          group: worker
+          policy: fifo
+          priority: 20
 )");
   const auto spec = must(capa::Spec::load(file.path()));
   const capa::Stage * st = spec.find("/rtchain_gone", "worker");
@@ -572,18 +580,19 @@ chains:
 TEST(Chain, AnExternalStageIsRefusedByBothEntryPoints)
 {
   SpecFile file(R"(
-chains:
-  sensor_in:
-    target: soft
-    stages:
-      - node: /rtchain_ext
-        group: dds_listener
-        external: true
-        expect_priority: 60
-      - node: /rtchain_ext
-        group: work
-        policy: fifo
-        priority: 70
+capa:
+  chains:
+    sensor_in:
+      target: soft
+      stages:
+        - node: /rtchain_ext
+          group: dds_listener
+          external: true
+          expect_priority: 60
+        - node: /rtchain_ext
+          group: work
+          policy: fifo
+          priority: 70
 )");
   const auto spec = must(capa::Spec::load(file.path()));
 

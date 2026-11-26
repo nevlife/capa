@@ -29,17 +29,17 @@ void run(const std::string & text)
 }
 
 const char * const kSeeds[] = {
-  "chains:\n  c:\n    target: hard\n    criticality: 2\n    stages:\n"
-  "      - {name: irq, kind: release, policy: fifo, priority: 60, cpus: [2]}\n"
-  "      - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2], children: reset}\n"
-  "      - {node: /per, group: infer, policy: fifo, priority: 70, cpus: [3], children: inherit}\n"
-  "      - {node: /ctl, group: loop, policy: rr, priority: 80, cpus: [4]}\n"
-  "  log:\n    target: soft\n    stages:\n"
-  "      - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2], children: reset}\n"
-  "      - {node: /log, policy: other}\n",
-  "chains:\n  e:\n    target: soft\n    stages:\n"
-  "      - {node: /dds, group: listener, external: true, expect_priority: 40}\n"
-  "      - {node: /w, policy: fifo, priority: 50}\n",
+  "capa:\n  chains:\n    c:\n      target: hard\n      criticality: 2\n      stages:\n"
+  "        - {name: irq, kind: release, policy: fifo, priority: 60, cpus: [2]}\n"
+  "        - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2], children: reset}\n"
+  "        - {node: /per, group: infer, policy: fifo, priority: 70, cpus: [3], children: inherit}\n"
+  "        - {node: /ctl, group: loop, policy: rr, priority: 80, cpus: [4]}\n"
+  "    log:\n      target: soft\n      stages:\n"
+  "        - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2], children: reset}\n"
+  "        - {node: /log, policy: other}\n",
+  "capa:\n  chains:\n    e:\n      target: soft\n      stages:\n"
+  "        - {node: /dds, group: listener, external: true, expect_priority: 40}\n"
+  "        - {node: /w, policy: fifo, priority: 50}\n",
 };
 
 const char * const kEdges[] = {"-1", "0", "99", "100", "4294967296", "1e9", "~", "[]", "{}", "''"};

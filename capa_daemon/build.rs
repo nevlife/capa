@@ -30,6 +30,8 @@ fn main() {
             Some((name, _)) => ("dylib", name),
             None => ("static", stem.trim_end_matches(".a")),
         };
+        // A static archive is copied into capad, so a new one must relink it.
+        println!("cargo:rerun-if-changed={lib}");
         println!("cargo:rustc-link-search=native={}", dir.display());
         println!("cargo:rustc-link-lib={kind}={name}");
     }

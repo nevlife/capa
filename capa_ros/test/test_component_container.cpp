@@ -219,23 +219,23 @@ TEST_F(Container, BindsTheDeclaredGroupsAndWarnsOfStagesThatBindNothing)
     GTEST_SKIP() << "needs five cpus to tell the stages apart";
   }
   start(
-    "chains:\n"
-    "  c:\n"
-    "    target: soft\n"
-    "    stages:\n"
-    "      - {node: /planner, cpus: " +
+    "capa:\n  chains:\n"
+    "    c:\n"
+    "      target: soft\n"
+    "      stages:\n"
+    "        - {node: /planner, cpus: " +
     cpu(all[0]) +
     "}\n"
-    "      - {node: /planner, group: traj, holds: {subscription: /capa_ct/traj}, cpus: " +
+    "        - {node: /planner, group: traj, holds: {subscription: /capa_ct/traj}, cpus: " +
     cpu(all[1]) +
     "}\n"
-    "      - {node: /planner, group: frames, holds: {subscription: /capa_ct/frames}, cpus: " +
+    "        - {node: /planner, group: frames, holds: {subscription: /capa_ct/frames}, cpus: " +
     cpu(all[2]) +
     "}\n"
-    "      - {node: /planner, group: stale, holds: {subscription: /capa_ct/trajectory}, cpus: " +
+    "        - {node: /planner, group: stale, holds: {subscription: /capa_ct/trajectory}, cpus: " +
     cpu(all[3]) +
     "}\n"
-    "      - {node: /planner, group: work, cpus: " +
+    "        - {node: /planner, group: work, cpus: " +
     cpu(all[4]) + "}\n");
 
   ASSERT_TRUE(wait(load_planner())->success);
@@ -264,11 +264,11 @@ TEST_F(Container, ARefusedStageStopsTheContainer)
     GTEST_SKIP() << "capa-cap:rtprio this host grants SCHED_FIFO, so nothing refuses the stage";
   }
   start(
-    "chains:\n"
-    "  c:\n"
-    "    target: soft\n"
-    "    stages:\n"
-    "      - {node: /planner, group: traj, holds: {subscription: /capa_ct/traj}, policy: fifo, "
+    "capa:\n  chains:\n"
+    "    c:\n"
+    "      target: soft\n"
+    "      stages:\n"
+    "        - {node: /planner, group: traj, holds: {subscription: /capa_ct/traj}, policy: fifo, "
     "priority: 10}\n");
 
   load_planner();
@@ -279,12 +279,12 @@ TEST_F(Container, ARefusedStageStopsTheContainer)
 TEST_F(Container, TwoStagesOnOneGroupRefuseTheLoad)
 {
   start(
-    "chains:\n"
-    "  c:\n"
-    "    target: soft\n"
-    "    stages:\n"
-    "      - {node: /planner}\n"
-    "      - {node: /planner, group: odom, holds: {subscription: /capa_ct/odom}}\n");
+    "capa:\n  chains:\n"
+    "    c:\n"
+    "      target: soft\n"
+    "      stages:\n"
+    "        - {node: /planner}\n"
+    "        - {node: /planner, group: odom, holds: {subscription: /capa_ct/odom}}\n");
 
   const auto response = wait(load_planner());
   EXPECT_FALSE(response->success);

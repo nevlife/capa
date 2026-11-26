@@ -87,17 +87,17 @@ def test_a_group_child_runs_where_it_was_declared(node):
 def _spec_file(tmp_path, cpu):
     path = tmp_path / "rt_spec.yaml"
     path.write_text(
-        "chains:\n"
-        "  camera_to_control:\n"
-        "    target: soft\n"
-        "    stages:\n"
-        "      - node: /flux_rt_test\n"
-        "        group: infer\n"
-        f"        cpus: [{cpu}]\n"
-        "      - node: /control_node\n"
-        "        group: loop\n"
-        "        policy: fifo\n"
-        "        priority: 90\n"
+        "capa:\n  chains:\n"
+        "    camera_to_control:\n"
+        "      target: soft\n"
+        "      stages:\n"
+        "        - node: /flux_rt_test\n"
+        "          group: infer\n"
+        f"          cpus: [{cpu}]\n"
+        "        - node: /control_node\n"
+        "          group: loop\n"
+        "          policy: fifo\n"
+        "          priority: 90\n"
     )
     return str(path)
 
@@ -338,15 +338,15 @@ def test_a_stage_must_name_the_node_and_its_unit(node, tmp_path):
 def _holds_spec(tmp_path, first, last):
     path = tmp_path / "holds.yaml"
     path.write_text(
-        "chains:\n"
-        "  c:\n"
-        "    target: soft\n"
-        "    stages:\n"
-        f"      - {{node: /flux_rt_test, cpus: [{first}]}}\n"
-        "      - node: /flux_rt_test\n"
-        "        group: traj\n"
-        "        holds: {subscription: /pytest/holds/traj}\n"
-        f"        cpus: [{last}]\n"
+        "capa:\n  chains:\n"
+        "    c:\n"
+        "      target: soft\n"
+        "      stages:\n"
+        f"        - {{node: /flux_rt_test, cpus: [{first}]}}\n"
+        "        - node: /flux_rt_test\n"
+        "          group: traj\n"
+        "          holds: {subscription: /pytest/holds/traj}\n"
+        f"          cpus: [{last}]\n"
     )
     return str(path)
 
@@ -375,7 +375,7 @@ def test_bind_declared_reaches_the_node_unit(node, tmp_path, monkeypatch):
     target = spare_cpus[-1]
     path = tmp_path / "unit.yaml"
     path.write_text(
-        "chains: {c: {target: soft, stages: [{node: /flux_rt_test, group: traj, "
+        "capa:\n  chains: {c: {target: soft, stages: [{node: /flux_rt_test, group: traj, "
         f"holds: {{subscription: /pytest/holds/traj}}, cpus: [{target}]}}]}}}}\n"
     )
     monkeypatch.setenv("CAPA_SPEC", str(path))

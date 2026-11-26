@@ -48,26 +48,27 @@ private:
 int SpecFile::counter_ = 0;
 
 constexpr const char * kGood = R"(
-chains:
-  perception_to_control:
-    target: hard
-    stages:
-      - node: /camera_node
-        group: dds_listener
-        external: true
-        expect_priority: 60
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-        cpus: [2]
-      - node: /perception_node
-        group: infer
-        policy: fifo
-        priority: 75
-      - node: /control_node
-        group: loop
-        policy: fifo
-        priority: 90
+capa:
+  chains:
+    perception_to_control:
+      target: hard
+      stages:
+        - node: /camera_node
+          group: dds_listener
+          external: true
+          expect_priority: 60
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+          cpus: [2]
+        - node: /perception_node
+          group: infer
+          policy: fifo
+          priority: 75
+        - node: /control_node
+          group: loop
+          policy: fifo
+          priority: 90
 )";
 
 }  // namespace
@@ -99,19 +100,20 @@ TEST(Spec, RejectsAChainThatDoesNotClimb)
   // Perception above control starves the loop it feeds. This is preflight's priority-order rule
   // past two stages, and only the file can see it.
   SpecFile f(R"(
-chains:
-  inverted:
-    target: soft
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-      - node: /perception_node
-        policy: fifo
-        priority: 95
-      - node: /control_node
-        policy: fifo
-        priority: 90
+capa:
+  chains:
+    inverted:
+      target: soft
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+        - node: /perception_node
+          policy: fifo
+          priority: 95
+        - node: /control_node
+          policy: fifo
+          priority: 90
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
@@ -121,15 +123,16 @@ TEST(Spec, NonRtStagesSitOutsideTheOrdering)
   // A SCHED_OTHER consumer at the end of a chain is not a priority inversion: it never takes part
   // in RT priority at all. Requiring it to keep climbing would reject a normal logging path.
   SpecFile f(R"(
-chains:
-  logging:
-    target: soft
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-      - node: /logger_node
-        policy: other
+capa:
+  chains:
+    logging:
+      target: soft
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+        - node: /logger_node
+          policy: other
 )");
   EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
@@ -137,24 +140,25 @@ chains:
 TEST(Spec, AStageMaySitOnTwoChainsButNotTwoWays)
 {
   const char * body = R"(
-chains:
-  control:
-    target: hard
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-      - node: /control_node
-        policy: fifo
-        priority: 90
-  logging:
-    target: soft
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: %d
-      - node: /logger_node
-        policy: other
+capa:
+  chains:
+    control:
+      target: hard
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+        - node: /control_node
+          policy: fifo
+          priority: 90
+    logging:
+      target: soft
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: %d
+        - node: /logger_node
+          policy: other
 )";
   char same[1024];
   std::snprintf(same, sizeof same, body, 70);
@@ -174,24 +178,25 @@ chains:
 TEST(Spec, TheStrictestChainAStageSitsOnDecidesItsStrictness)
 {
   SpecFile f(R"(
-chains:
-  logging:
-    target: soft
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-      - node: /logger_node
-        policy: other
-  control:
-    target: hard
-    stages:
-      - node: /camera_node
-        policy: fifo
-        priority: 70
-      - node: /control_node
-        policy: fifo
-        priority: 90
+capa:
+  chains:
+    logging:
+      target: soft
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+        - node: /logger_node
+          policy: other
+    control:
+      target: hard
+      stages:
+        - node: /camera_node
+          policy: fifo
+          priority: 70
+        - node: /control_node
+          policy: fifo
+          priority: 90
 )");
   const auto spec = must(capa::Spec::load(f.path()));
   const auto * cam = spec.find("/camera_node");
@@ -206,13 +211,14 @@ chains:
 TEST(Spec, ExternalExpectPriorityIsAnRtPriorityOrUndeclared)
 {
   const char * body = R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /a
-        external: true
-        expect_priority: %d
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /a
+          external: true
+          expect_priority: %d
 )";
   for (int bad : {-1, 100}) {
     char text[512];
@@ -235,33 +241,36 @@ TEST(Spec, RejectsWhatItDidNotRead)
   // No version field: a version number announces a schema change and says nothing about a typo.
   // Refusing every key we did not read catches both.
   SpecFile typo(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /a
-        policy: fifo
-        priorty: 70
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /a
+          policy: fifo
+          priorty: 70
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(typo.path())), capa::ErrorKind::Failed);
 
   SpecFile stray_target(R"(
-chains:
-  c:
-    target: medium
-    stages:
-      - node: /a
-        policy: other
+capa:
+  chains:
+    c:
+      target: medium
+      stages:
+        - node: /a
+          policy: other
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(stray_target.path())), capa::ErrorKind::Failed);
 
   SpecFile relative(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: a
-        policy: other
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: a
+          policy: other
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(relative.path())), capa::ErrorKind::Failed)
     << "a node name that is not fully qualified names a different node than the running one";
@@ -272,14 +281,15 @@ TEST(Spec, ExternalStagesCarryNoThreadOptions)
   // An external stage is a record of somebody else's thread. Options here would read as something
   // capa applies, and it never does.
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /a
-        external: true
-        policy: fifo
-        priority: 60
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /a
+          external: true
+          policy: fifo
+          priority: 60
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
@@ -310,39 +320,41 @@ TEST(Spec, HardChainsGiveEachRtThreadItsOwnCore)
   // groups to one core undoes it. SCHED_FIFO has no timeslice, so the first one there holds the
   // core until it blocks. It also breaks nohz_full, which needs at most one runnable task.
   SpecFile hard(R"(
-chains:
-  c:
-    target: hard
-    stages:
-      - node: /a
-        group: x
-        policy: fifo
-        priority: 70
-        cpus: [2]
-      - node: /b
-        group: y
-        policy: fifo
-        priority: 80
-        cpus: [2]
+capa:
+  chains:
+    c:
+      target: hard
+      stages:
+        - node: /a
+          group: x
+          policy: fifo
+          priority: 70
+          cpus: [2]
+        - node: /b
+          group: y
+          policy: fifo
+          priority: 80
+          cpus: [2]
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(hard.path())), capa::ErrorKind::Failed);
 
   // Different cores is the arrangement the split was for.
   SpecFile apart(R"(
-chains:
-  c:
-    target: hard
-    stages:
-      - node: /a
-        group: x
-        policy: fifo
-        priority: 70
-        cpus: [2]
-      - node: /b
-        group: y
-        policy: fifo
-        priority: 80
-        cpus: [3]
+capa:
+  chains:
+    c:
+      target: hard
+      stages:
+        - node: /a
+          group: x
+          policy: fifo
+          priority: 70
+          cpus: [2]
+        - node: /b
+          group: y
+          policy: fifo
+          priority: 80
+          cpus: [3]
 )");
   EXPECT_TRUE((capa::Spec::load(apart.path())).ok());
 }
@@ -353,20 +365,21 @@ TEST(Spec, SoftChainsMayShareAnRtCore)
   // tell whether the core is isolated at all. Strictness draws the line, as it does over
   // preflight's Warn findings.
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /a
-        group: x
-        policy: fifo
-        priority: 70
-        cpus: [2]
-      - node: /b
-        group: y
-        policy: fifo
-        priority: 80
-        cpus: [2]
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /a
+          group: x
+          policy: fifo
+          priority: 70
+          cpus: [2]
+        - node: /b
+          group: y
+          policy: fifo
+          priority: 80
+          cpus: [2]
 )");
   EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
@@ -376,23 +389,24 @@ TEST(Spec, TheCollisionIsFoundAcrossChainsToo)
   // Two chains can put two stages on one core without either chain being wrong on its own. Only
   // a file holding both sees it -- the same reason the conflicting-declaration check exists.
   SpecFile f(R"(
-chains:
-  control:
-    target: hard
-    stages:
-      - node: /a
-        group: x
-        policy: fifo
-        priority: 70
-        cpus: [2]
-  vision:
-    target: hard
-    stages:
-      - node: /b
-        group: y
-        policy: fifo
-        priority: 80
-        cpus: [2]
+capa:
+  chains:
+    control:
+      target: hard
+      stages:
+        - node: /a
+          group: x
+          policy: fifo
+          priority: 70
+          cpus: [2]
+    vision:
+      target: hard
+      stages:
+        - node: /b
+          group: y
+          policy: fifo
+          priority: 80
+          cpus: [2]
 )");
   EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }
@@ -402,18 +416,19 @@ TEST(Spec, NonRtStagesDoNotCollide)
   // SCHED_OTHER threads sharing a core is what every Linux box does. The rule is about RT
   // threads blocking each other, not about co-tenancy.
   SpecFile f(R"(
-chains:
-  c:
-    target: hard
-    stages:
-      - node: /a
-        group: x
-        policy: other
-        cpus: [2]
-      - node: /b
-        group: y
-        policy: other
-        cpus: [2]
+capa:
+  chains:
+    c:
+      target: hard
+      stages:
+        - node: /a
+          group: x
+          policy: other
+          cpus: [2]
+        - node: /b
+          group: y
+          policy: other
+          cpus: [2]
 )");
   EXPECT_TRUE((capa::Spec::load(f.path())).ok());
 }
@@ -423,13 +438,14 @@ chains:
 TEST(Spec, OneStageIsHeldByOneLiveThread)
 {
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - node: /claim
-        group: worker
-        cpus: [0]
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - node: /claim
+          group: worker
+          cpus: [0]
 )");
   const auto spec = must(capa::Spec::load(f.path()));
   const capa::Stage & stage = (*must(spec.stage("/claim", "worker")));
@@ -480,24 +496,26 @@ TEST(Spec, TheFlowRuleBindsOnlyStagesThatShareACpu)
   // Disjoint cpus: neither can preempt the other, so upstream may run higher.
   EXPECT_EQ(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /a, policy: fifo, priority: 80, cpus: [2]}
-      - {node: /b, policy: fifo, priority: 70, cpus: [3]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /a, policy: fifo, priority: 80, cpus: [2]}
+        - {node: /b, policy: fifo, priority: 70, cpus: [3]}
 )"),
     "<loaded>");
 
   // A shared cpu: upstream above downstream is the starvation the rule exists for.
   EXPECT_NE(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /a, policy: fifo, priority: 80, cpus: [2, 3]}
-      - {node: /b, policy: fifo, priority: 70, cpus: [3]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /a, policy: fifo, priority: 80, cpus: [2, 3]}
+        - {node: /b, policy: fifo, priority: 70, cpus: [3]}
 )")
       .find("downstream of it on a cpu they share"),
     std::string::npos);
@@ -505,12 +523,13 @@ chains:
   // Equal on a shared cpu: FIFO does not preempt at equal priority.
   EXPECT_EQ(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /a, policy: fifo, priority: 70, cpus: [2]}
-      - {node: /b, policy: fifo, priority: 70, cpus: [2]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /a, policy: fifo, priority: 70, cpus: [2]}
+        - {node: /b, policy: fifo, priority: 70, cpus: [2]}
 )"),
     "<loaded>");
 }
@@ -521,23 +540,25 @@ TEST(Spec, ReleaseStagesRunAboveTheWorkersTheyFeed)
   // the workers' ladder.
   EXPECT_EQ(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {name: cam_irq, kind: release, policy: fifo, priority: 60, cpus: [2]}
-      - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {name: cam_irq, kind: release, policy: fifo, priority: 60, cpus: [2]}
+        - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2]}
 )"),
     "<loaded>");
 
   EXPECT_NE(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {name: cam_irq, kind: release, policy: fifo, priority: 50, cpus: [2]}
-      - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {name: cam_irq, kind: release, policy: fifo, priority: 50, cpus: [2]}
+        - {node: /cam, group: grab, policy: fifo, priority: 55, cpus: [2]}
 )")
       .find("does not run above worker"),
     std::string::npos);
@@ -546,16 +567,17 @@ chains:
 TEST(Spec, TheMoreCriticalChainComesFirstOnASharedCpu)
 {
   const char * body = R"(
-chains:
-  control:
-    target: soft
-    criticality: 2
-    stages:
-      - {node: /ctl, policy: fifo, priority: %d, cpus: [4]}
-  logging:
-    target: soft
-    stages:
-      - {node: /log, policy: fifo, priority: 30, cpus: [4]}
+capa:
+  chains:
+    control:
+      target: soft
+      criticality: 2
+      stages:
+        - {node: /ctl, policy: fifo, priority: %d, cpus: [4]}
+    logging:
+      target: soft
+      stages:
+        - {node: /log, policy: fifo, priority: 30, cpus: [4]}
 )";
   char above[512];
   std::snprintf(above, sizeof above, body, 40);
@@ -572,17 +594,18 @@ TEST(Spec, AStageTakesTheHighestCriticalityOfItsChains)
   // below it even though both are listed in the logging chain.
   EXPECT_NE(
     load_error(R"(
-chains:
-  control:
-    target: soft
-    criticality: 1
-    stages:
-      - {node: /cam, policy: fifo, priority: 50, cpus: [2]}
-  logging:
-    target: soft
-    stages:
-      - {node: /cam, policy: fifo, priority: 50, cpus: [2]}
-      - {node: /log, policy: fifo, priority: 60, cpus: [2]}
+capa:
+  chains:
+    control:
+      target: soft
+      criticality: 1
+      stages:
+        - {node: /cam, policy: fifo, priority: 50, cpus: [2]}
+    logging:
+      target: soft
+      stages:
+        - {node: /cam, policy: fifo, priority: 50, cpus: [2]}
+        - {node: /log, policy: fifo, priority: 60, cpus: [2]}
 )")
       .find("more critical chain comes first"),
     std::string::npos);
@@ -592,12 +615,13 @@ TEST(Spec, AHardCoreCountsWorkersNotReleaseThreads)
 {
   EXPECT_EQ(
     load_error(R"(
-chains:
-  c:
-    target: hard
-    stages:
-      - {name: cam_irq, kind: release, policy: fifo, priority: 60, cpus: [2]}
-      - {node: /cam, policy: fifo, priority: 55, cpus: [2]}
+capa:
+  chains:
+    c:
+      target: hard
+      stages:
+        - {name: cam_irq, kind: release, policy: fifo, priority: 60, cpus: [2]}
+        - {node: /cam, policy: fifo, priority: 55, cpus: [2]}
 )"),
     "<loaded>");
 }
@@ -607,12 +631,13 @@ chains:
 TEST(Spec, TwoStagesSpelledAlikeAreRefused)
 {
   const std::string err = load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /foo/bar, cpus: [0]}
-      - {node: /foo, group: bar, cpus: [1]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /foo/bar, cpus: [0]}
+        - {node: /foo, group: bar, cpus: [1]}
 )");
   EXPECT_NE(err.find("both named /foo/bar"), std::string::npos) << err;
 }
@@ -620,11 +645,12 @@ chains:
 TEST(Spec, NameStagesAreNotNodes)
 {
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {name: driver_poll, policy: other}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {name: driver_poll, policy: other}
 )");
   const auto spec = must(capa::Spec::load(f.path()));
   ASSERT_NE(spec.find("driver_poll"), nullptr);
@@ -632,38 +658,41 @@ chains:
   EXPECT_EQ(spec.find("/driver_poll"), nullptr) << "a leading '/' looks up a node";
 
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{name: /x}]}}").find("must not start"),
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: /x}]}}").find("must not start"),
     std::string::npos);
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{name: x, group: g}]}}").find("is a name"),
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: x, group: g}]}}")
+      .find("is a name"),
     std::string::npos);
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{name: x, node: /x}]}}").find("both"),
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: x, node: /x}]}}").find("both"),
     std::string::npos);
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{policy: other}]}}").find("neither"),
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{policy: other}]}}").find("neither"),
     std::string::npos);
 }
 
 TEST(Spec, ChildrenAreDeclaredPerStage)
 {
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /omp, policy: fifo, priority: 20, children: inherit}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /omp, policy: fifo, priority: 20, children: inherit}
 )");
   EXPECT_EQ(
     must(must(capa::Spec::load(f.path())).stage("/omp"))->opts.children, capa::Children::Inherit);
 
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{node: /a, children: inherit}]}}")
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{node: /a, children: inherit}]}}")
       .find("would be ignored"),
     std::string::npos)
     << "inherit with no RT policy passes nothing on";
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{node: /a, external: true, children: reset}]}}")
+    load_error(
+      "capa:\n  chains: {c: {target: soft, stages: [{node: /a, external: true, children: reset}]}}")
       .find("must not carry"),
     std::string::npos);
 }
@@ -672,15 +701,16 @@ TEST(Spec, TwoChainsMustAgreeOnKindAndChildren)
 {
   EXPECT_NE(
     load_error(R"(
-chains:
-  a:
-    target: soft
-    stages:
-      - {node: /s, policy: fifo, priority: 20}
-  b:
-    target: soft
-    stages:
-      - {node: /s, policy: fifo, priority: 20, children: inherit}
+capa:
+  chains:
+    a:
+      target: soft
+      stages:
+        - {node: /s, policy: fifo, priority: 20}
+    b:
+      target: soft
+      stages:
+        - {node: /s, policy: fifo, priority: 20, children: inherit}
 )")
       .find("declared differently"),
     std::string::npos);
@@ -701,8 +731,8 @@ struct SpecEnv
 
 auto pin_spec(std::uint32_t cpu) -> std::string
 {
-  return "chains:\n  c:\n    target: soft\n    stages:\n      - node: /bind_node\n"
-         "        group: work\n        cpus: [" +
+  return "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - node: /bind_node\n"
+         "          group: work\n          cpus: [" +
          std::to_string(cpu) + "]\n";
 }
 
@@ -737,8 +767,9 @@ namespace
 {
 auto fifo_spec(const char * target) -> std::string
 {
-  return std::string("chains:\n  c:\n    target: ") + target +
-         "\n    stages:\n      - node: /ask_node\n        policy: fifo\n        priority: 10\n";
+  return std::string("capa:\n  chains:\n    c:\n      target: ") + target +
+         "\n      stages:\n        - node: /ask_node\n          policy: fifo\n          priority: "
+         "10\n";
 }
 
 // Whether this process's record shows /ask_node asking capad.
@@ -826,12 +857,13 @@ TEST(Spawn, ARefusalReachesTheCallerAndTheFunctionNeverRuns)
 TEST(Bind, TheReportCarriesTheFileOrderingAsChecked)
 {
   SpecFile f(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /ord, group: a, policy: fifo, priority: 10}
-      - {node: /ord, group: b, policy: fifo, priority: 20}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /ord, group: a, policy: fifo, priority: 10}
+        - {node: /ord, group: b, policy: fifo, priority: 20}
 )");
   const auto spec = must(capa::Spec::load(f.path()));
   const capa::Report host = must(capa::preflight((*must(spec.stage("/ord", "a"))).opts));
@@ -881,31 +913,33 @@ TEST(Spec, EqualCriticalityOrDisjointCpusBindNoOrderBetweenChains)
   // Same criticality: neither chain comes first, so the lower-priority stage may be either.
   EXPECT_EQ(
     load_error(R"(
-chains:
-  a:
-    target: soft
-    stages:
-      - {node: /a, policy: fifo, priority: 20, cpus: [4]}
-  b:
-    target: soft
-    stages:
-      - {node: /b, policy: fifo, priority: 30, cpus: [4]}
+capa:
+  chains:
+    a:
+      target: soft
+      stages:
+        - {node: /a, policy: fifo, priority: 20, cpus: [4]}
+    b:
+      target: soft
+      stages:
+        - {node: /b, policy: fifo, priority: 30, cpus: [4]}
 )"),
     "<loaded>");
 
   // More critical but on another cpu: the two never compete.
   EXPECT_EQ(
     load_error(R"(
-chains:
-  a:
-    target: soft
-    criticality: 5
-    stages:
-      - {node: /a, policy: fifo, priority: 20, cpus: [4]}
-  b:
-    target: soft
-    stages:
-      - {node: /b, policy: fifo, priority: 30, cpus: [5]}
+capa:
+  chains:
+    a:
+      target: soft
+      criticality: 5
+      stages:
+        - {node: /a, policy: fifo, priority: 20, cpus: [4]}
+    b:
+      target: soft
+      stages:
+        - {node: /b, policy: fifo, priority: 30, cpus: [5]}
 )"),
     "<loaded>");
 }
@@ -916,13 +950,14 @@ TEST(Spec, AnExternalReleaseStageMustClearEveryWorkerOfItsChain)
 {
   EXPECT_NE(
     load_error(R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {name: nic_irq, kind: release, external: true, expect_priority: 60}
-      - {node: /rx, policy: fifo, priority: 55, cpus: [2]}
-      - {node: /ctl, policy: fifo, priority: 70, cpus: [3]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {name: nic_irq, kind: release, external: true, expect_priority: 60}
+        - {node: /rx, policy: fifo, priority: 55, cpus: [2]}
+        - {node: /ctl, policy: fifo, priority: 70, cpus: [3]}
 )")
       .find("does not run above worker /ctl"),
     std::string::npos);
@@ -931,21 +966,22 @@ chains:
 TEST(Spec, AMatchNamesAnInterruptOrAProcessAndThread)
 {
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{name: usb, kind: release, match: "
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: usb, kind: release, match: "
                "{irq: 3550000.usb}, policy: fifo, priority: 60, cpus: [2]}]}}"),
     "<loaded>");
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, "
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, "
                "thread: dds.recv}, cpus: [2]}]}}"),
     "<loaded>");
 
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{name: rx, match: {arg: "
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{name: rx, match: {arg: "
                "\"__node:=planning\", thread: recvUC}, cpus: [2]}]}}"),
     "<loaded>");
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{name: rx, match: {process: agnocast_compon, "
-               "arg: \"__node:=planning\", thread: recvUC}, cpus: [2]}]}}"),
+    load_error(
+      "capa:\n  chains: {c: {target: soft, stages: [{name: rx, match: {process: agnocast_compon, "
+      "arg: \"__node:=planning\", thread: recvUC}, cpus: [2]}]}}"),
     "<loaded>");
 
   for (const char * bad : {
@@ -959,7 +995,8 @@ TEST(Spec, AMatchNamesAnInterruptOrAProcessAndThread)
          "{name: a, external: true, match: {irq: x}}",                // nobody sets an external one
        }) {
     EXPECT_NE(
-      load_error(std::string("chains: {c: {target: soft, stages: [") + bad + "]}}"), "<loaded>")
+      load_error(std::string("capa:\n  chains: {c: {target: soft, stages: [") + bad + "]}}"),
+      "<loaded>")
       << bad;
   }
 }
@@ -967,7 +1004,7 @@ TEST(Spec, AMatchNamesAnInterruptOrAProcessAndThread)
 TEST(Spec, ChildrenCpusMovesResetChildrenOffTheStagesOwnCpus)
 {
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{node: /a, cpus: [2], "
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{node: /a, cpus: [2], "
                "children_cpus: [0, 1]}]}}"),
     "<loaded>");
   for (const char * bad : {
@@ -976,7 +1013,8 @@ TEST(Spec, ChildrenCpusMovesResetChildrenOffTheStagesOwnCpus)
          "{node: /a, policy: fifo, priority: 20, cpus: [2], children: inherit, children_cpus: [0]}",
        }) {
     EXPECT_NE(
-      load_error(std::string("chains: {c: {target: soft, stages: [") + bad + "]}}"), "<loaded>")
+      load_error(std::string("capa:\n  chains: {c: {target: soft, stages: [") + bad + "]}}"),
+      "<loaded>")
       << bad;
   }
 }
@@ -985,7 +1023,7 @@ TEST(Spec, ChildrenCpusMovesResetChildrenOffTheStagesOwnCpus)
 TEST(Bind, AMatchedStageIsRefused)
 {
   SpecFile f(
-    "chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, thread: "
+    "capa:\n  chains: {c: {target: soft, stages: [{name: rx, match: {process: cam, thread: "
     "dds.recv}, cpus: [0]}]}}\n");
   const auto spec = must(capa::Spec::load(f.path()));
   std::thread t([&] {
@@ -1000,7 +1038,7 @@ TEST(Bind, AFailedRebindKeepsTheStageItHeld)
   const auto allowed = capa::current().cpus;
   ASSERT_FALSE(allowed.empty());
   SpecFile f(
-    "chains: {c: {target: soft, stages: [{node: /rebind, group: a, cpus: [" +
+    "capa:\n  chains: {c: {target: soft, stages: [{node: /rebind, group: a, cpus: [" +
     std::to_string(allowed.back()) + "]}, {node: /rebind, group: b, cpus: [1000]}]}}\n");
   const auto spec = must(capa::Spec::load(f.path()));
   std::thread t([&] {
@@ -1019,11 +1057,12 @@ TEST(Bind, AFailedRebindKeepsTheStageItHeld)
 TEST(Verify, AWindowReadsTheThreadsAndItsCpusCounters)
 {
   const SpecFile file(R"(
-chains:
-  a:
-    target: soft
-    stages:
-      - {name: toucher, policy: other}
+capa:
+  chains:
+    a:
+      target: soft
+      stages:
+        - {name: toucher, policy: other}
 )");
   const capa::Stage stage = *must(must(capa::Spec::load(file.path())).stage("toucher"));
   std::promise<int> tid;
@@ -1069,11 +1108,12 @@ chains:
 TEST(VerifyProcess, NamesIoUringHelperThreads)
 {
   const SpecFile file(R"(
-chains:
-  a:
-    target: soft
-    stages:
-      - {name: plain, policy: other}
+capa:
+  chains:
+    a:
+      target: soft
+      stages:
+        - {name: plain, policy: other}
 )");
   const capa::Spec spec = must(capa::Spec::load(file.path()));
   EXPECT_EQ(capa::verify_process(spec).find("io-uring")->verdict, capa::Verdict::Ok);
@@ -1096,7 +1136,7 @@ chains:
 TEST(Spec, HoldsNamesAGroupByWhatItHolds)
 {
   EXPECT_EQ(
-    load_error("chains: {c: {target: soft, stages: [{node: /mvp, group: traj, holds: "
+    load_error("capa:\n  chains: {c: {target: soft, stages: [{node: /mvp, group: traj, holds: "
                "{subscription: /traj}, cpus: [2]}, {node: /mvp, group: srv, holds: "
                "{service: /mvp/set}, cpus: [2]}]}}"),
     "<loaded>");
@@ -1113,12 +1153,14 @@ TEST(Spec, HoldsNamesAGroupByWhatItHolds)
          "cpus: [2]}",
        }) {
     EXPECT_NE(
-      load_error(std::string("chains: {c: {target: soft, stages: [") + bad + "]}}"), "<loaded>")
+      load_error(std::string("capa:\n  chains: {c: {target: soft, stages: [") + bad + "]}}"),
+      "<loaded>")
       << bad;
   }
   EXPECT_NE(
-    load_error("chains: {c: {target: soft, stages: [{node: /a, group: x, holds: {subscription: "
-               "/t}}, {node: /a, group: y, holds: {subscription: /t}}]}}")
+    load_error(
+      "capa:\n  chains: {c: {target: soft, stages: [{node: /a, group: x, holds: {subscription: "
+      "/t}}, {node: /a, group: y, holds: {subscription: /t}}]}}")
       .find("hold the same thing"),
     std::string::npos);
 }
@@ -1134,15 +1176,16 @@ auto group(std::vector<std::string> subs, bool is_default = false) -> capa::Grou
 }
 
 constexpr const char * kPlanner = R"(
-chains:
-  c:
-    target: soft
-    stages:
-      - {node: /mvp, cpus: [0]}
-      - {node: /mvp, group: traj, holds: {subscription: /path_optimizer/trajectory}, cpus: [0]}
-      - {node: /mvp, group: by_label, cpus: [0]}
-      - {node: /mvp, group: ext, external: true}
-      - {node: /other, holds: {subscription: /x}, group: x, cpus: [0]}
+capa:
+  chains:
+    c:
+      target: soft
+      stages:
+        - {node: /mvp, cpus: [0]}
+        - {node: /mvp, group: traj, holds: {subscription: /path_optimizer/trajectory}, cpus: [0]}
+        - {node: /mvp, group: by_label, cpus: [0]}
+        - {node: /mvp, group: ext, external: true}
+        - {node: /other, holds: {subscription: /x}, group: x, cpus: [0]}
 )";
 }  // namespace
 
@@ -1195,8 +1238,8 @@ TEST(Bind, BindDeclaredBindsOnlyWhatTheFileDeclares)
 
   SpecFile f(
     pin_spec(allowed.back()) +
-    "      - {node: /bind_node, group: ext, external: true}\n"
-    "      - {name: rx, match: {process: p, thread: t}, cpus: [0]}\n");
+    "        - {node: /bind_node, group: ext, external: true}\n"
+    "        - {name: rx, match: {process: p, thread: t}, cpus: [0]}\n");
   SpecEnv env(f.path());
   std::vector<std::uint32_t> before;
   std::vector<std::uint32_t> after;
@@ -1217,9 +1260,22 @@ TEST(Bind, BindDeclaredBindsOnlyWhatTheFileDeclares)
   EXPECT_EQ(after, std::vector<std::uint32_t>{allowed.back()});
 }
 
+TEST(Spec, ChainsSitUnderCapaBesideOrmasRules)
+{
+  const std::string chain = "  chains: {c: {target: soft, stages: [{node: /a}]}}\n";
+  EXPECT_EQ(load_error("capa:\n" + chain + "orma:\n  topic_hz_min: []\n"), "<loaded>");
+  EXPECT_NE(load_error(chain.substr(2)).find("chains moved under capa:"), std::string::npos);
+  EXPECT_NE(
+    load_error("capa:\n" + chain + "cpaa: {}\n").find("unknown key 'cpaa' in the file root"),
+    std::string::npos);
+  EXPECT_NE(
+    load_error("capa:\n" + chain + "  interval: 1\n").find("unknown key 'interval' in capa"),
+    std::string::npos);
+}
+
 // yaml-cpp reports through exceptions, and one thrown outside the parsing loop would leave load().
 TEST(Spec, AKeyThatIsNoStringIsAnErrorRatherThanAnException)
 {
-  SpecFile f("[a, b]: 1\nchains: {}\n");
+  SpecFile f("[a, b]: 1\ncapa: {chains: {}}\n");
   EXPECT_EQ(kind_of(capa::Spec::load(f.path())), capa::ErrorKind::Failed);
 }

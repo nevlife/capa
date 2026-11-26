@@ -22,13 +22,14 @@ C++ 함수는 실패를 반환값으로 알린다. 실패 가능한 함수는 `c
 체인의 모든 stage는 `CAPA_SPEC`이 가리키는 체인 파일에 적는다. `stages` 항목 하나가 stage이고, stage는 스레드 하나(노드와 그룹, 또는 이름)와 그 스케줄(정책, 우선순위, CPU)을 정한다.
 
 ```yaml
-chains:
-  perception_to_control:
-    target: hard
-    stages:
-      - {node: /camera_node, group: grab, policy: fifo, priority: 60, cpus: [2]}
-      - {node: /perception_node, group: infer, policy: fifo, priority: 70, cpus: [3]}
-      - {node: /control_node, group: loop, policy: fifo, priority: 80, cpus: [4]}
+capa:
+  chains:
+    perception_to_control:
+      target: hard
+      stages:
+        - {node: /camera_node, group: grab, policy: fifo, priority: 60, cpus: [2]}
+        - {node: /perception_node, group: infer, policy: fifo, priority: 70, cpus: [3]}
+        - {node: /control_node, group: loop, policy: fifo, priority: 80, cpus: [4]}
 ```
 
 스레드는 자기가 어느 stage인지만 지정한다. 사용하는 호출은 스레드를 생성한 주체에 따라 정해진다.
@@ -54,32 +55,33 @@ chains:
 ## 2. 체인 파일
 
 ```yaml
-chains:
-  perception_to_control:
-    target: hard                  # hard: preflight Warn이 적용을 막는다. soft: 보고만 한다
-    criticality: 2                # 높을수록 공유 CPU에서 먼저. 기본 0
-    stages:
-      - name: camera_usb_irq      # ROS 스레드가 아니면 name으로 부른다
-        kind: release             # 일을 넘겨주기만 한다. 먹이는 worker보다 위에서 돈다
-        external: true            # capa가 걸지 않는다. 기본값 50에서 chrt로 올렸다
-        expect_priority: 85       # external은 어느 CPU에나 올 수 있으므로 모든 worker보다 위
-      - node: /camera_node
-        group: grab               # 생략 = 노드의 기본 콜백 그룹
-        policy: fifo              # inherit / other / fifo / rr
-        priority: 55
-        cpus: [2]
-        children: reset           # reset(기본) / inherit
-      - node: /perception_node
-        group: infer
-        policy: fifo
-        priority: 70
-        cpus: [3]
-        children: inherit         # OpenMP 팀 스레드가 이 stage의 일을 한다
-      - node: /control_node
-        group: loop
-        policy: fifo
-        priority: 80
-        cpus: [4]
+capa:
+  chains:
+    perception_to_control:
+      target: hard                  # hard: preflight Warn이 적용을 막는다. soft: 보고만 한다
+      criticality: 2                # 높을수록 공유 CPU에서 먼저. 기본 0
+      stages:
+        - name: camera_usb_irq      # ROS 스레드가 아니면 name으로 부른다
+          kind: release             # 일을 넘겨주기만 한다. 먹이는 worker보다 위에서 돈다
+          external: true            # capa가 걸지 않는다. 기본값 50에서 chrt로 올렸다
+          expect_priority: 85       # external은 어느 CPU에나 올 수 있으므로 모든 worker보다 위
+        - node: /camera_node
+          group: grab               # 생략 = 노드의 기본 콜백 그룹
+          policy: fifo              # inherit / other / fifo / rr
+          priority: 55
+          cpus: [2]
+          children: reset           # reset(기본) / inherit
+        - node: /perception_node
+          group: infer
+          policy: fifo
+          priority: 70
+          cpus: [3]
+          children: inherit         # OpenMP 팀 스레드가 이 stage의 일을 한다
+        - node: /control_node
+          group: loop
+          policy: fifo
+          priority: 80
+          cpus: [4]
 ```
 
 | 키 | 위치 | 뜻 |
@@ -399,15 +401,16 @@ if (stage) {
 컴포넌트 컨테이너는 노드를 로드해 그룹마다 스레드를 생성하지만, 그 노드의 그룹 라벨을 모른다. 그래서 파일의 기본 그룹 stage와 `holds` stage로 그룹을 고른다. 그룹 생성 순서대로 번호를 매겨 고르지 않는다. 그렇게 하면 노드 코드에 그룹이 하나 늘었을 때 같은 번호가 경고 없이 다른 그룹을 가리키게 된다.
 
 ```yaml
-chains:
-  plan_to_control:
-    target: soft
-    stages:
-      - node: /planning/motion_velocity_planner
-        group: trajectory   # stage의 이름
-        holds: {subscription: /planning/path_optimizer/trajectory}
-        policy: fifo
-        priority: 44
+capa:
+  chains:
+    plan_to_control:
+      target: soft
+      stages:
+        - node: /planning/motion_velocity_planner
+          group: trajectory   # stage의 이름
+          holds: {subscription: /planning/path_optimizer/trajectory}
+          policy: fifo
+          priority: 44
 ```
 
 `capa_component_container`는 flux 컴포넌트 컨테이너(`flux::ComponentManager`, 그룹마다 스레드 하나)에 이 규칙을 더한 실행 파일이다. 노드 코드는 capa를 호출하지 않아도 된다.
@@ -529,25 +532,26 @@ flux를 사용하는 프로세스에는 이런 스레드가 셋 있고, GPU가 �
 | GPU 드라이버의 인터럽트 스레드 | 그 GPU의 모든 완료 신호 대기(PREEMPT_RT나 `threadirqs`에서 스레드가 된다) | `match: {irq: <handler>}`, 이름은 `/sys/kernel/irq/<n>/actions`의 것 |
 
 ```yaml
-chains:
-  perception:
-    target: hard
-    stages:
-      - name: gpu_irq
-        kind: release
-        policy: fifo
-        priority: 88
-        match: {irq: nvidia}
-      - name: parker
-        kind: release
-        policy: fifo
-        priority: 86
-        match: {process: perception, thread: flux-parker}
-      - node: /perception_node
-        group: infer
-        policy: fifo
-        priority: 70
-        cpus: [3]
+capa:
+  chains:
+    perception:
+      target: hard
+      stages:
+        - name: gpu_irq
+          kind: release
+          policy: fifo
+          priority: 88
+          match: {irq: nvidia}
+        - name: parker
+          kind: release
+          policy: fifo
+          priority: 86
+          match: {process: perception, thread: flux-parker}
+        - node: /perception_node
+          group: infer
+          policy: fifo
+          priority: 70
+          cpus: [3]
 ```
 
 `foreign-rt-thread`는 파일이 선언하지 않았는데 stage보다 높은 RT 스레드를 보여 준다. 넘겨주는 스레드가 RT가 아니면 여기에 나오지 않으므로, stage가 무엇을 기다리는지 추적해 찾는다.

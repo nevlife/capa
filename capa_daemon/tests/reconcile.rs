@@ -60,8 +60,8 @@ impl Drop for SpecFile {
 
 fn match_spec(thread: &str, cpu: u32) -> String {
     format!(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - name: tgt\n        \
-         match: {{process: {}, thread: {thread}}}\n        cpus: [{cpu}]\n",
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - name: tgt\n          \
+         match: {{process: {}, thread: {thread}}}\n          cpus: [{cpu}]\n",
         self_comm()
     )
 }
@@ -198,11 +198,11 @@ fn a_reload_keeps_what_still_matches_and_puts_back_the_rest() {
     let comm = self_comm();
     let stage = |name: &str| {
         format!(
-            "      - {{name: {name}, match: {{process: {comm}, thread: capad_t_{name}}}, \
+            "        - {{name: {name}, match: {{process: {comm}, thread: capad_t_{name}}}, \
              cpus: [{last}]}}\n"
         )
     };
-    let head = "chains:\n  c:\n    target: soft\n    stages:\n";
+    let head = "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n";
     let first = SpecFile::new(&format!("{head}{}{}", stage("keep"), stage("drop")));
     let mut older = Reconciler::load(&first.path).unwrap();
     older.pass();
@@ -224,8 +224,8 @@ fn a_preflight_refusal_sets_nothing() {
     let _serial = serial();
     let target = Target::new("capad_t_deny");
     let f = SpecFile::new(&format!(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - name: tgt\n        \
-         match: {{process: {}, thread: capad_t_deny}}\n        policy: fifo\n        \
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - name: tgt\n          \
+         match: {{process: {}, thread: capad_t_deny}}\n          policy: fifo\n          \
          priority: 99\n",
         self_comm()
     ));
@@ -404,8 +404,8 @@ impl Drop for Holder {
 fn a_thread_without_permission_asks_and_capad_answers() {
     let _serial = serial();
     let f = SpecFile::new(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /holder\n        \
-         policy: fifo\n        priority: 10\n",
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - node: /holder\n          \
+         policy: fifo\n          priority: 10\n",
     );
     if ffi::refusal(&ffi::load(&f.path).unwrap(), 0, ffi::this_tid()).is_empty() {
         eprintln!("skipped: capa-cap:no-rtprio a thread here may set FIFO itself, so none asks");
@@ -445,8 +445,8 @@ fn a_thread_without_permission_asks_and_capad_answers() {
 
 fn holder_spec(cpu: u32, children: u32) -> SpecFile {
     SpecFile::new(&format!(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - node: /holder\n        \
-         cpus: [{cpu}]\n        children_cpus: [{children}]\n"
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - node: /holder\n          \
+         cpus: [{cpu}]\n          children_cpus: [{children}]\n"
     ))
 }
 
@@ -672,8 +672,8 @@ fn sets_a_thread_found_by_an_argument_of_its_process() {
     let argv0 = env::args().next().unwrap();
     let t = Target::new("capad_t_arg");
     let f = SpecFile::new(&format!(
-        "chains:\n  c:\n    target: soft\n    stages:\n      - name: tgt\n        \
-         match: {{arg: \"{argv0}\", thread: capad_t_arg}}\n        cpus: [{last}]\n"
+        "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n        - name: tgt\n          \
+         match: {{arg: \"{argv0}\", thread: capad_t_arg}}\n          cpus: [{last}]\n"
     ));
     let mut rec = Reconciler::load(&f.path).unwrap();
     let lines = rec.pass();

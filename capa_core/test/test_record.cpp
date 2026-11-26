@@ -38,9 +38,9 @@ auto run_dir() -> std::string
 auto spec_file() -> std::string
 {
   const std::string path = "/tmp/capa_record_" + std::to_string(::getpid()) + ".yaml";
-  std::ofstream(path) << "chains:\n  c:\n    target: soft\n    stages:\n"
-                         "      - {node: /rec, group: work, cpus: [0]}\n"
-                         "      - {name: helper, cpus: [0]}\n";
+  std::ofstream(path) << "capa:\n  chains:\n    c:\n      target: soft\n      stages:\n"
+                         "        - {node: /rec, group: work, cpus: [0]}\n"
+                         "        - {name: helper, cpus: [0]}\n";
   return path;
 }
 
